@@ -1,0 +1,1392 @@
+================================================================================
+AI-BASED INTELLIGENT QUESTION PAPER SCRUTINY DECISION SUPPORT SYSTEM (DSS)
+MASTER TECHNICAL SPECIFICATION & COMPREHENSIVE ENGINEERING REFERENCE
+================================================================================
+
+PROJECT WORKSPACE: e:/ai-question-paper-scrutiny - Copy (2)
+SYSTEM ARCHITECTURE: Decoupled Single Page Application (React 18 + Vite) & High-Performance REST API (FastAPI + Python 3) + MongoDB
+SYSTEM VERSION: 2.0.0 (API) / 1.0.0 (Core Engine)
+TARGET INSTITUTION: Autonomous Engineering Colleges & Autonomous University Examination Cells
+SECURITY CLASSIFICATION: Institutional Academic Workflow / Human-in-the-Loop Supervision
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+1. EXECUTIVE SYSTEM OVERVIEW & CORE PHILOSOPHY
+2. COMPLETE MASTER TECHNOLOGY STACK (ALL TECHNOLOGIES & TOOLS USED)
+3. SYSTEM SECURITY ARCHITECTURE & PROTOCOLS
+4. COMPLETE DATABASE ARCHITECTURE (ALL 21 MONGODB COLLECTIONS)
+5. MACHINE LEARNING, NLP METHODS & SCRUTINY ALGORITHMS (ALL 34 TECHNIQUES)
+6. COMPLETE END-TO-END SYSTEM FUNCTIONALITIES (EVERY FEATURE EXPLAINED)
+7. COMPREHENSIVE REST API SPECIFICATION
+8. CODEBASE STRUCTURE & FILE-BY-FILE DIRECTORY
+9. SYSTEM CONFIGURATION, ENVIRONMENT VARIABLES & EXECUTION GUIDE
+
+================================================================================
+1. EXECUTIVE SYSTEM OVERVIEW & CORE PHILOSOPHY
+================================================================================
+
+1.1 PROBLEM STATEMENT
+In autonomous engineering colleges and higher education institutions, semester examination question papers must undergo rigorous scrutiny before printing and administration. Question papers must strictly conform to:
+- Accurate total marks allocation and section totals.
+- Unambiguous, sequential question numbering without duplicate or skipped question numbers.
+- Balanced internal choice options across questions and sections.
+- Comprehensive Course Outcome (CO) mapping aligned with Outcome-Based Education (OBE) and National Board of Accreditation (NBA) criteria.
+- Balanced cognitive distribution adhering to Bloom's Revised Taxonomy (K1 through K6), mandating adequate Higher-Order Thinking Skills (HOTS: K3–K6 >= 40%).
+- Strict examination unit-boundary compliance (e.g., Mid-Semester / Continuous Assessment exams covering strictly Units 1 and 2, flagging any out-of-syllabus questions).
+- Mitigation of excessive repetition from previous years' examination question banks to prevent question leakage and ensure pedagogical variety.
+
+Manual scrutiny conducted by academic committees is labor-intensive, error-prone, subjective, and creates administrative bottlenecks under tight examination schedules.
+
+1.2 SYSTEM OBJECTIVE & PURPOSE
+The AI-Based Intelligent Question Paper Scrutiny Decision Support System (DSS) automates the generation of objective, reproducible, and verifiable scrutiny evidence. It ingests examination question papers (PDF, DOCX, TXT) and curriculum reference files (Syllabus, CO documents, PPTs, Historical Question Banks), parses hierarchical question structures, validates institutional examination rules, performs semantic cognitive classification, detects past question similarity, and calculates an objective 100-point scrutiny score.
+
+1.3 CORE ENGINEERING PHILOSOPHY: HUMAN-IN-THE-LOOP (HITL)
+- Assistive Decision Support, Not Autonomous Authority: The AI system generates evidence, computes metrics, and flags defects; however, the final institutional authority remains strictly with the human moderator (Chief Examination Scrutinizer).
+- Official Statuses: APPROVED, MODIFICATION_REQUIRED, REJECTED, REVIEW_DECLINED.
+- Ground-Truth Precedence: Ground-truth data explicitly printed on the examination paper (e.g., explicit marks [10 Marks], explicit CO [CO3], explicit Bloom level [K4]) has absolute priority over AI model predictions or heuristic inferences.
+- Zero-Hallucination Policy: The parser and AI engines never invent question marks, text, or metadata. If marks are missing, they remain null, triggering a rule warning rather than hallucinating arbitrary values.
+- Multi-Subject Workspace Isolation: Syllabi, Course Outcomes, unit boundaries, reference materials, historical question banks, and examination rules are strictly isolated by subject_id. Cross-subject uploads are actively detected and rejected.
+
+1.4 USER ROLES & ACCESS MATRIX
+The system implements a three-tier Role-Based Access Control (RBAC) hierarchy:
+1. FACULTY:
+   - Self-registers or is provisioned by an administrator.
+   - Manages curriculum workspaces (Units, Topics, Course Outcomes, Curriculum Documents) for assigned subjects.
+   - Uploads syllabus documents (PDF/DOCX/TXT) with automated regex parsing.
+   - Uploads historical previous papers to populate the subject's question bank.
+   - Uploads current examination question papers with active unit scope selection.
+   - Views own uploaded question papers, scrutiny dashboards, score breakdowns, and moderator feedback.
+   - Restricted from viewing other faculty members' papers.
+   - Restricted from deleting APPROVED question papers.
+2. MODERATOR:
+   - Accesses all question papers across all departments and subjects.
+   - Accesses the Moderator Review Queue to inspect papers awaiting scrutiny sign-off.
+   - Reviews scrutiny reports, rule checks, similarity matches, and grammar suggestions.
+   - Performs inline field corrections (e.g., overriding Bloom levels or CO mappings).
+   - Issues official decisions (APPROVED, MODIFICATION_REQUIRED, REJECTED, REVIEW_DECLINED) with mandatory remarks.
+   - Configures subject examination patterns and rules.
+   - Exports the supervised moderator correction dataset (CSV/JSON) for auditing and fine-tuning.
+3. ADMINISTRATOR:
+   - Possesses all Moderator capabilities.
+   - Full system administration: creates and manages user accounts (Faculty, Moderator, Admin).
+   - Oversees system-wide audit logs, database integrity, and institutional configuration.
+
+================================================================================
+2. COMPLETE MASTER TECHNOLOGY STACK (ALL TECHNOLOGIES & TOOLS USED)
+================================================================================
+
+2.1 FRONTEND TECHNOLOGY STACK
+- Core Language: JavaScript (ECMAScript 2022+ / ES6+), JSX
+- UI Library: React 18.2.0 (Component-driven architecture, Functional Components, Custom Hooks)
+- State Management: React Context API (AuthContext, ThemeContext) + Local Component State (useState, useEffect, useMemo, useCallback) + Browser LocalStorage persistence
+- Application Bundler & Dev Server: Vite 5.1.0 (Native ESM, Hot Module Replacement [HMR], Production Rollup builds, dev server proxy forwarding `/api` to port 8000)
+- Single Page Application (SPA) Routing: React Router DOM 6.22.0 (BrowserRouter, Routes, Route, NavLink, Outlet, Navigate, Lazy loading with Suspense)
+- CSS & Styling: Tailwind CSS 3.4.1 (Utility-first styling, class-based Dark/Light theme switching, custom brand palette: adcet-red, adcet-navy, adcet-cream)
+- PostCSS & Autoprefixer: PostCSS 8.4.35, Autoprefixer 10.4.17 (CSS parsing, vendor prefixing)
+- Iconography: Lucide React 0.330.0 (Feather-based SVG modern icons)
+- Data Visualization: Recharts 2.12.0 (Responsive SVG charts: PieChart for Bloom's Taxonomy cognitive distribution, BarChart for scrutiny status summaries)
+- HTTP Client: Axios 1.6.7 (Base instance configured with baseURL `/api`, 180-second timeout for long scrutiny pipelines, automatic JWT Bearer token request interceptor, automatic 401 response interceptor with session expiration redirection)
+- Document Export & Blob Utilities: Native Browser Blob API, FileSaver mechanisms (`exportUtils.js`) for downloading PDF, CSV, and JSON reports
+- Typography: Google Fonts (Inter, Source Sans 3, IBM Plex Sans)
+
+2.2 BACKEND TECHNOLOGY STACK
+- Core Language: Python 3.10+
+- Web Framework: FastAPI 0.109+ (High-performance ASGI framework, OpenAPI / Swagger UI `/docs`, ReDoc `/redoc`, strict type validation via Pydantic)
+- ASGI Server: Uvicorn 0.27+ (High-throughput asynchronous server running at `0.0.0.0:8000` with auto-reload)
+- Data Validation & Schemas: Pydantic v2 (BaseModel, Field, model_validate, model_dump) and Pydantic-Settings (BaseSettings for `.env` loading and production secret validation)
+- Database Driver: PyMongo 4.6+ (Native MongoDB driver, connection pooling with maxPoolSize=50, minPoolSize=5, serverSelectionTimeoutMS=5000)
+- Authentication & JWT: python-jose 3.3.0 (Cryptographic JSON Web Token encoding and decoding using HMAC-SHA256 [HS256])
+- Password Encryption: Passlib 1.7.4 with bcrypt engine (CryptContext with automatic salt generation and work factor 12)
+- Form & File Parsing: python-multipart 0.0.9 (Streaming multipart/form-data decoding for file uploads)
+- PDF Extraction & Layout Analysis: PyMuPDF (fitz / pymupdf 1.23+) (Dual-mode text extraction, page block sorting, physical coordinate analysis, C-Tesseract integration)
+- Optical Character Recognition (OCR): Pytesseract 0.3.10+ (Two-tier fallback OCR for scanned and image-based PDFs)
+- Word Document Extraction: python-docx 1.1.0 (OOXML Word document ingestion, paragraph parsing, table cell deduplication across merged columns)
+- Presentation Document Extraction: python-pptx 0.6.23 (PowerPoint slide text and shape extraction for subject curriculum document repositories)
+- Automated PDF Generation: ReportLab 4.1+ (Enterprise PDF creation using Platypus layout engine, SimpleDocTemplate, Paragraph, Table, TableStyle, KeepTogether, PageTemplate)
+- Machine Learning & Vectorization: Scikit-Learn 1.4+ (TfidfVectorizer with unigram + bigram support, pairwise cosine_similarity)
+- Numerical Computing: NumPy 1.26+ (64-dimensional float vector allocations, hashing trick modulo operations, Euclidean L2 vector normalization)
+- Testing & Quality Assurance: Pytest 8.0+, HTTPX 0.26+ (Asynchronous TestClient integration testing against FastAPI application)
+
+2.3 DATABASE ENGINE
+- Database: MongoDB 6.0+ / 7.0+
+- Default URI: `mongodb://localhost:27017`
+- Default Database Name: `question_paper_scrutiny`
+- Primary Key Architecture: Integer sequence IDs generated atomically via MongoDB `$inc` operator on the `counters` collection (allowing clean URLs like `/papers/5`), alongside native MongoDB BSON `_id` (ObjectId)
+- Serialization Layer: Centralized `serialize_doc` and `serialize_docs` converting MongoDB ObjectIds and ISO-formatted datetimes into JSON-compliant data structures
+- Indexing: 12 pre-configured compound and sparse unique indexes initialized during application startup
+
+2.4 ARTIFICIAL INTELLIGENCE & LARGE LANGUAGE MODELS (LLM)
+- Primary Generative AI Provider: Google Gemini via `google.generativeai` SDK
+- Supported Models: `gemini-2.5-flash`, `gemini-1.5-flash`
+- Interaction Pattern: Academic structured JSON prompting with controlled prompt stuffing (subject curriculum, Course Outcomes, unit boundaries injected into system context)
+- Deterministic Offline Fallback: Zero-network offline semantic heuristic engine (`_semantic_heuristic_analysis`) utilizing Bloom's action-verb dictionaries, Course Outcome description token overlap, and weighted syllabus keyword scoring
+
+2.5 DEVELOPMENT, BUILD & RUNTIME TOOLS
+- Development IDE: VS Code with configured `.vscode/tasks.json` ("Run Full Application" launching both backend and frontend concurrently)
+- Version Control: Git
+- Package Managers: `pip` (Python package manager), `npm` (Node.js package manager)
+- Environment Configuration: Pydantic BaseSettings loading from `.env` and system environment variables
+
+================================================================================
+3. SYSTEM SECURITY ARCHITECTURE & PROTOCOLS
+================================================================================
+
+3.1 AUTHENTICATION SUBSYSTEM
+- Stateless JSON Web Tokens (JWT): Uses the HS256 algorithm with configurable expiration (`ACCESS_TOKEN_EXPIRE_MINUTES`, default 1440 minutes / 24 hours).
+- Token Claims: `sub` (integer user ID), `role` (FACULTY, MODERATOR, ADMIN), `exp` (UNIX epoch expiration timestamp).
+- Secret Key Enforcement: The application requires a cryptographically strong secret (`JWT_SECRET`). In development, it defaults to a secure 48-character URL-safe token; in production, Pydantic model validators enforce a minimum length of 32 characters.
+- Multi-Channel Authorization Header: Supports standard HTTP Bearer token via the `Authorization: Bearer <token>` header, with fallback query parameter `?token=<token>` to enable authenticated streaming downloads of PDF, CSV, and JSON exports in new browser windows.
+
+3.2 PASSWORD SECURITY & STORAGE
+- Industry-Standard Hashing: Passwords are never stored in plaintext. They are salted and hashed using `bcrypt` via Passlib's `CryptContext`.
+- Constant-Time Comparison: Password verification uses constant-time string comparison algorithms within bcrypt to eliminate timing attack vulnerabilities.
+
+3.3 MULTI-TIER ROLE-BASED ACCESS CONTROL (RBAC)
+- Dependency Injection Security Gates: FastAPI route handlers enforce permissions using `require_role(["MODERATOR", "ADMIN"])` or `require_role(["FACULTY", "ADMIN", "MODERATOR"])`.
+- Frontend Route Protection:
+  - `ProtectedRoute`: Verifies that a valid user session exists; otherwise redirects to `/login`.
+  - `RoleRoute`: Evaluates `allowedRoles` against `user.role`, redirecting unauthorized users back to `/dashboard`.
+- Adaptive UI Rendering: The navigation sidebar dynamically hides or reveals restricted workspaces (e.g., Review Queue, User Management, Feedback Export) based on the authenticated user's assigned role.
+
+3.4 RESOURCE OWNERSHIP & PRIVACY ISOLATION
+- Faculty Data Privacy: Faculty members can only query, view, or analyze question papers where `uploaded_by_id == current_user.id`. Any attempt by a faculty member to access another faculty member's paper via `/api/papers/{id}`, `/api/scrutiny/{id}`, or `/api/history/{id}` triggers an immediate HTTP 403 Forbidden.
+- Deletion Protection on Approved Papers: Faculty users are prohibited from deleting any question paper that has received official MODERATOR approval (HTTP 400 Bad Request). Only MODERATOR or ADMIN roles can delete approved papers.
+- Moderator & Admin Omniscience: Authorized moderators and administrators possess universal oversight across all departments and submissions.
+
+3.5 CROSS-SUBJECT UPLOAD SECURITY & MISMATCH DETECTION
+- Pre-Upload & Upload Validation: Prevent accidental cross-subject uploads (e.g., uploading a Database Management Systems question paper under a Machine Learning subject workspace).
+- Subject Verification Engine (`subject_validation_service.py`):
+  - Extracts document text and header metadata.
+  - Matches detected subject codes against the target subject code.
+  - Compares question tokens against the subject's distinctive keyword dictionary and syllabus topics.
+  - If a mismatch is detected, upload/scrutiny is rejected with HTTP 422 Unprocessable Entity, setting the paper status to `SUBJECT_MISMATCH` and logging an audit event.
+- Scrutiny Gating: Scrutiny analysis and moderator decisions are blocked unless the paper achieves a `VALID_MATCH` validation status.
+
+3.6 FILE UPLOAD HARDENING & SIZE RESTRICTION
+- Strict Extension Whitelisting: Only approved document formats are permitted (`.pdf`, `.docx`, `.doc`, `.txt`, `.pptx`). All other extensions are rejected immediately (HTTP 400).
+- Server-Side File Size Enforcement: Implemented in `_save_upload_file` via chunked stream reads. If uploaded bytes exceed `MAX_UPLOAD_SIZE_MB * 1024 * 1024` (default 10 MB), the server aborts writing, cleans up temporary files, and raises HTTP 413 Payload Too Large.
+- Deterministic File Naming: Files are sanitized and stored locally using the pattern `paper_{userId}_{paperId}.{ext}` to completely prevent directory traversal (`../`) and file overwrite attacks.
+- Scanned PDF Detection: Scanned or image-based PDFs lacking a selectable text layer are detected via alphanumeric density checking (< 30 characters). If OCR fails, the system safely raises `ScannedDocumentException`, preventing corrupted or empty data from entering the database.
+
+3.7 IMMUTABLE AUDIT LOGGING & ACCOUNTABILITY
+- Audit Trail Engine (`audit_service.py`): Every critical institutional event is permanently recorded in the `audit_logs` collection.
+- Logged Events: `LOGIN`, `REGISTER`, `UPLOAD`, `ANALYZE`, `RESUME`, `DELETE`, `MODERATOR_APPROVED`, `MODERATOR_REJECTED`, `MODERATOR_MODIFICATION_REQUIRED`, `MODERATOR_REVIEW_DECLINED`, `SYLLABUS_UPLOAD`, `SUBJECT_MISMATCH`.
+- Recorded Metadata: Timestamp (ISO 8601 UTC), User ID, User Role, Entity Type, Entity ID, Action, and contextual metadata.
+
+3.8 CROSS-ORIGIN RESOURCE SHARING (CORS) & SANITIZATION
+- Granular Origin Control: CORS origins are parsed directly from configuration (`settings.CORS_ORIGINS`, defaulting to `http://localhost:3000,http://127.0.0.1:3000`), permitting secure credential transmission while blocking unauthorized third-party domains.
+- Output Sanitization: AI-generated responses undergo markdown code fence stripping and strict Pydantic model validation before being committed to MongoDB.
+
+================================================================================
+4. COMPLETE DATABASE ARCHITECTURE (ALL 21 MONGODB COLLECTIONS)
+================================================================================
+
+The system uses MongoDB as its primary data store. The database name is `question_paper_scrutiny`. All collections, schema structures, field definitions, and indexes are documented below:
+
+1. `counters`
+   - Purpose: Generates thread-safe, monotonic auto-incrementing integer IDs for collections so URLs maintain clean integer parameters.
+   - Fields:
+     * `_id` (string): Name of the sequence (e.g., "users", "question_papers", "scrutiny_reports").
+     * `seq` (integer): Current sequence value, incremented atomically using `$inc`.
+
+2. `users`
+   - Purpose: Stores institutional user accounts and authentication credentials.
+   - Fields:
+     * `id` (integer, unique): Sequence identifier.
+     * `email` (string, unique): Institutional email address.
+     * `hashed_password` (string): bcrypt salted hash.
+     * `full_name` (string): User's legal/academic name.
+     * `role` (string): One of 'FACULTY', 'MODERATOR', 'ADMIN'.
+     * `department` (string): Academic department (e.g., "Computer Science & Engineering").
+     * `is_active` (boolean): Account activation status.
+     * `created_at` (string): ISO 8601 UTC timestamp.
+   - Indexes: `email` (unique), `id` (unique, sparse).
+
+3. `subjects`
+   - Purpose: Academic course workspaces isolating curriculum, exams, and scrutiny.
+   - Fields:
+     * `id` (integer, unique): Sequence identifier.
+     * `code` (string, unique): Course code (e.g., "CS301", "IT402").
+     * `name` (string): Full subject name (e.g., "Database Management Systems").
+     * `department` (string): Department offering the course.
+     * `branch` (string): Engineering branch.
+     * `semester` (integer): Semester number (1 to 8).
+     * `total_marks` (integer): Institutional default total attemptable marks (e.g., 100, 70, 50).
+     * `duration_minutes` (integer): Allotted examination duration in minutes (e.g., 180, 120).
+     * `created_at` (string): ISO 8601 UTC timestamp.
+   - Indexes: `code` (unique), `id` (unique, sparse).
+
+4. `course_outcomes`
+   - Purpose: Configured Course Outcomes for Outcome-Based Education (OBE).
+   - Fields:
+     * `id` (integer, unique): Sequence identifier.
+     * `subject_id` (integer): Reference to `subjects.id`.
+     * `co_code` (string): Normalized outcome code (e.g., "CO1", "CO2").
+     * `description` (string): Detailed pedagogical description of the outcome.
+   - Indexes: `subject_id`.
+
+5. `syllabus_units`
+   - Purpose: Units or modules comprising the subject syllabus.
+   - Fields:
+     * `id` (integer, unique): Sequence identifier.
+     * `subject_id` (integer): Reference to `subjects.id`.
+     * `unit_number` (integer): Unit ordinal (1 to 6).
+     * `title` (string): Descriptive unit heading (e.g., "Relational Model & SQL").
+     * `description` (string): Summary description.
+     * `topics` (array of objects): Embedded array of topics `[{"topic_name": "...", "description": "..."}]`.
+   - Indexes: Compound index on `(subject_id, unit_number)`.
+
+6. `syllabus_topics`
+   - Purpose: Detailed granular topics under syllabus units (when stored relationally).
+   - Fields:
+     * `id` (integer, unique): Sequence identifier.
+     * `unit_id` (integer): Reference to `syllabus_units.id`.
+     * `topic_name` (string): Name of topic.
+     * `description` (string): Description of topic.
+     * `co_id` (integer, nullable): Associated Course Outcome reference.
+
+7. `syllabus_documents`
+   - Purpose: Records of official syllabus files uploaded and parsed for a subject.
+   - Fields:
+     * `id` (integer, unique): Sequence identifier.
+     * `subject_id` (integer): Reference to `subjects.id`.
+     * `filename` (string): Original document filename.
+     * `file_path` (string): Local absolute filesystem path.
+     * `file_type` (string): Extension ("pdf", "docx", "txt").
+     * `academic_year` (string): Academic session (e.g., "2025-2026").
+     * `uploaded_by_id` (integer): Reference to `users.id`.
+     * `uploaded_by_name` (string): Name of faculty who uploaded.
+     * `unit_count` (integer): Number of units extracted from file.
+     * `co_count` (integer): Number of Course Outcomes extracted from file.
+     * `raw_text_length` (integer): Total extracted character length.
+     * `created_at` (string): ISO 8601 UTC timestamp.
+   - Indexes: `subject_id`.
+
+8. `subject_documents`
+   - Purpose: Supplemental curriculum materials (PPTs, Lecture Notes, Question Banks).
+   - Fields:
+     * `id` (integer, unique): Sequence identifier.
+     * `subject_id` (integer): Reference to `subjects.id`.
+     * `unit_id` (integer, nullable): Associated unit number/ID.
+     * `doc_type` (string): "SYLLABUS", "CO_DOC", "PPT", "NOTES", "EXAM_PATTERN", "RULES", "OTHER".
+     * `title` (string): Document title.
+     * `filename` (string): Uploaded filename.
+     * `file_path` (string): Local filesystem path.
+     * `academic_year` (string): Academic year.
+     * `semester` (integer): Semester.
+     * `uploaded_by_id` (integer): Uploader user ID.
+     * `extracted_text` (string): Plaintext content extracted from document.
+   - Indexes: `subject_id`.
+
+9. `examination_patterns`
+   - Purpose: Institutional scrutiny rules and threshold parameters configured per subject.
+   - Fields:
+     * `id` (integer, unique): Sequence identifier.
+     * `subject_id` (integer): Reference to `subjects.id`.
+     * `total_marks` (integer): Standard exam marks (default 100).
+     * `duration_minutes` (integer): Standard exam duration in minutes (default 180).
+     * `choice_pattern` (string): Description of choice rules (e.g., "Solve any 4 out of 6").
+     * `min_co_coverage_pct` (float): Minimum required Course Outcome coverage (default 80.0%).
+     * `min_unit_coverage_pct` (float): Minimum required syllabus unit coverage (default 80.0%).
+     * `min_higher_order_bloom_pct` (float): Minimum percentage of HOTS questions (default 40.0%).
+     * `solve_time_limit_pct` (float): Solving time threshold percentage (default 80.0%).
+     * `similarity_threshold` (float): Historical duplicate detection threshold percentage (default 65.0% / 70.0%).
+
+10. `examinations`
+    - Purpose: Specific examination definitions with constrained unit scopes.
+    - Fields:
+      * `id` (integer, unique): Sequence identifier.
+      * `subject_id` (integer): Reference to `subjects.id`.
+      * `title` (string): Exam title (e.g., "Mid-Semester Examination 1").
+      * `exam_type` (string): "Mid-Sem", "End-Sem", "Internal Assessment", "Supplementary".
+      * `academic_year` (string): Academic year.
+      * `semester` (integer): Semester.
+      * `total_marks` (integer): Exam marks.
+      * `duration_minutes` (integer): Exam duration.
+      * `selected_units` (array of integers): Configured syllabus units (e.g., `[1, 2]`).
+      * `created_at` (string): ISO 8601 UTC timestamp.
+
+11. `question_papers`
+    - Purpose: Master record of all uploaded examination question papers.
+    - Fields:
+      * `id` (integer, unique): Sequence identifier.
+      * `title` (string): Title of question paper.
+      * `subject_id` (integer): Reference to `subjects.id`.
+      * `examination_id` (integer, nullable): Reference to `examinations.id`.
+      * `uploaded_by_id` (integer): Reference to `users.id` (Faculty owner).
+      * `filename` (string): Original filename.
+      * `file_path` / `filepath` (string): Local absolute file storage path.
+      * `file_type` (string): File extension ("pdf", "docx", "txt").
+      * `academic_year` (string): Academic year.
+      * `exam_type` (string): Examination category.
+      * `selected_units_json` (array of integers): Active syllabus units selected for scrutiny.
+      * `status` (string): Current lifecycle status:
+        - "SUBMITTED": Uploaded, pending processing.
+        - "EXTRACTED": Questions parsed successfully.
+        - "ANALYZING": Scrutiny pipeline actively executing.
+        - "PENDING_REVIEW": Analysis complete, awaiting human moderator review.
+        - "APPROVED": Officially approved by moderator.
+        - "MODIFICATION_REQUIRED": Changes requested by moderator.
+        - "REJECTED": Officially rejected by moderator.
+        - "REVIEW_DECLINED": Moderator declined review.
+        - "EXTRACTION_FAILED": Document parsing failed (e.g., scanned PDF).
+        - "SUBJECT_MISMATCH": Document belongs to a different subject.
+        - "FAILED": Processing error encountered.
+      * `validation_status` (string): "PENDING", "VALID_MATCH", "SUBJECT_MISMATCH", "VALIDATION_INCONCLUSIVE", "DOCUMENT_PROCESSING_FAILED".
+      * `validation_details` (object): Metadata from subject verification engine.
+      * `overall_score` (float, nullable): Computed scrutiny score (0 to 100).
+      * `version` (integer): Report version count.
+      * `raw_text` (string): Full raw text extracted from document.
+      * `normalized_text` (string): Cleaned, normalized question paper text.
+      * `instructions_json` (array of strings): Candidate and exam instructions extracted from header.
+      * `moderator_decision` (string, nullable): Decision cached from review.
+      * `moderator_feedback` (string, nullable): Remarks cached from review.
+      * `moderator_required_action` (string, nullable): Action required from faculty.
+      * `moderator_name` (string, nullable): Name of moderating official.
+      * `moderated_at` (string, nullable): Timestamp of moderator review.
+    - Indexes: `id` (unique, sparse), `subject_id`, `uploaded_by_id`, `status`.
+
+12. `extracted_questions`
+    - Purpose: Hierarchical breakdown of every question item extracted from a question paper.
+    - Fields:
+      * `id` (integer, unique): Sequence identifier.
+      * `paper_id` (integer): Reference to `question_papers.id`.
+      * `question_number` (string): Normalized question number (e.g., "Q.1", "Q.1(a)").
+      * `original_number` (string): Number as printed on the original paper.
+      * `sub_question` (string, nullable): Subquestion identifier (e.g., "a", "b").
+      * `parent_number` (string, nullable): Parent group number (e.g., "Q.1").
+      * `parent_question_id` (integer, nullable): MongoDB ID of parent `QUESTION_GROUP`.
+      * `question_type` (string): "QUESTION", "SUBQUESTION", "QUESTION_GROUP".
+      * `question_text` (string): Clean question statement with metadata tokens stripped.
+      * `original_text` (string): Complete unstripped line/block text.
+      * `marks` (integer, nullable): Marks allocated to this item (never faked; null if missing).
+      * `internal_choice` (boolean): True if this question offers an "OR" alternative.
+      * `choice_group_id` (string, nullable): Unique pairing key for alternatives (e.g., "Q.1_a_choice").
+      * `section_name` (string, nullable): Academic section heading (e.g., "Section A", "Part I").
+      * `sequence_order` (integer): Sequential order in document.
+      * `parse_confidence` (float): Confidence of parsing (0.72 to 0.98).
+      * `marks_confidence` (float, nullable): Confidence of marks extraction.
+      * `metadata_confidence` (float, nullable): Confidence of printed CO/Bloom extraction.
+      * `bloom_level` (string, nullable): Cognitive level ("K1" through "K6").
+      * `co_code` (string, nullable): Associated Course Outcome ("CO1" through "CO6").
+      * `detected_unit_number` (integer, nullable): Mapped syllabus unit (1 to 6).
+      * `topic_name` (string, nullable): Mapped syllabus topic.
+      * `is_unit_selected` (boolean): True if unit is within active examination scope.
+      * `unit_validation_status` (string): "VALID", "UNSELECTED_UNIT", "UNMAPPED".
+    - Indexes: `id` (unique, sparse), `paper_id`, `sequence_order`.
+
+13. `previous_papers`
+    - Purpose: Historical question papers uploaded to build the reference question bank.
+    - Fields:
+      * `id` (integer, unique): Sequence identifier.
+      * `subject_id` (integer): Reference to `subjects.id`.
+      * `title` (string): Historical paper title (e.g., "End-Sem May 2024").
+      * `academic_year` (string): Year administered (e.g., "2023-2024").
+      * `exam_type` (string): Exam type (e.g., "End-Sem").
+      * `file_path` (string): Local storage path.
+      * `uploaded_at` (string): ISO 8601 UTC timestamp.
+    - Indexes: `subject_id`.
+
+14. `previous_questions`
+    - Purpose: Individual questions parsed from historical question papers.
+    - Fields:
+      * `id` (integer, unique): Sequence identifier.
+      * `paper_id` (integer): Reference to `previous_papers.id`.
+      * `question_number` (string): Historical question number.
+      * `question_text` (string): Historical question statement.
+      * `marks` (integer, nullable): Historical question marks.
+    - Indexes: `paper_id`.
+
+15. `question_embeddings`
+    - Purpose: Offline pre-computed 64-dimensional token hash vectors.
+    - Fields:
+      * `id` (integer, unique): Sequence identifier.
+      * `previous_question_id` (integer): Reference to `previous_questions.id`.
+      * `vector_json` (string): JSON string of 64 L2-normalized float values.
+
+16. `scrutiny_reports`
+    - Purpose: Comprehensive scrutiny report generated by the scrutiny pipeline.
+    - Fields:
+      * `id` (integer, unique): Sequence identifier.
+      * `paper_id` (integer): Reference to `question_papers.id`.
+      * `version` (integer): Incremental report version number (1, 2, ...).
+      * `overall_score` (float): Scrutiny quality score (0.0 to 100.0).
+      * `score_breakdown` (object): Granular score contributions across 9 dimensions.
+      * `evidence_coverage_pct` (float): Percentage of evaluated rubric criteria.
+      * `analysis_mode` (string): "gemini" (LLM-assisted) or "offline_heuristic".
+      * `analysis_notice` (string): Descriptive notice of analysis execution.
+      * `solving_time_minutes` (float, nullable): Estimated student completion duration.
+      * `compliance_summary` (string): Textual summary of scrutiny findings.
+      * `compliance_status` (string): Rating band ("Excellent", "Good", "Needs Review", etc.).
+      * `created_at` (string): ISO 8601 UTC timestamp.
+    - Indexes: `id` (unique, sparse), Compound index on `(paper_id, version DESC)`.
+
+17. `rule_results`
+    - Purpose: Individual rule evaluation outcomes generated by the RuleEngine.
+    - Fields:
+      * `report_id` (integer): Reference to `scrutiny_reports.id`.
+      * `category` (string): "MARKS", "NUMBERING", "CHOICE", "CO_COVERAGE", "UNIT_COVERAGE", "UNIT_COMPLIANCE", "BLOOM", "DURATION", "SIMILARITY".
+      * `rule_name` (string): Human-readable rule title.
+      * `expected_value` (string): Institutional requirement.
+      * `actual_value` (string): Value detected on the paper.
+      * `status` (string): "PASS", "WARNING", "FAIL", "NOT_EVALUATED".
+      * `message` (string): Actionable explanation of rule outcome.
+    - Indexes: `report_id`.
+
+18. `scrutiny_findings`
+    - Purpose: Itemized AI and heuristic findings per question.
+    - Fields:
+      * `id` (integer, unique): Sequence identifier.
+      * `report_id` (integer): Reference to `scrutiny_reports.id`.
+      * `question_id` (integer): Reference to `extracted_questions.id`.
+      * `finding_type` (string): "BLOOM", "CO", "SYLLABUS", "GRAMMAR", "QUALITY".
+      * `ai_value` (string): Evaluated value (overwritten when moderator submits a correction).
+      * `confidence` (float, nullable): Confidence metric (0.0 to 1.0).
+      * `reasoning` (string): Explanation supporting finding.
+      * `suggested_improvement` (string, nullable): Constructive improvement feedback.
+      * `issues` (array of objects): Detailed grammar or linguistic defect tokens.
+    - Indexes: Compound index on `(report_id, question_id)`.
+
+19. `similarity_results`
+    - Purpose: Detailed record of repeated questions exceeding the similarity threshold.
+    - Fields:
+      * `id` (integer, unique): Sequence identifier.
+      * `report_id` (integer): Reference to `scrutiny_reports.id`.
+      * `question_id` (integer): Reference to `extracted_questions.id`.
+      * `question_number` (string): Current question number.
+      * `matched_previous_question_id` (integer): Historical question ID or duplicate question ID.
+      * `matched_question_text` (string): Text of the matched question.
+      * `matched_paper_title` (string): Origin title of matched paper.
+      * `similarity_score` (float): Cosine similarity coefficient (e.g., 0.8421).
+      * `explanation` (string): Formatted explanation with percentage overlap.
+    - Indexes: `report_id`.
+
+20. `moderator_reviews`
+    - Purpose: Official review decisions, supervisory remarks, and inline corrections.
+    - Fields:
+      * `id` (integer, unique): Sequence identifier.
+      * `paper_id` (integer): Reference to `question_papers.id`.
+      * `report_id` (integer): Reference to `scrutiny_reports.id`.
+      * `moderator_id` (integer): Reference to `users.id`.
+      * `moderator_name` (string): Full name of moderator.
+      * `moderator_role` (string): "MODERATOR" or "ADMIN".
+      * `faculty_id` (integer, nullable): Faculty owner ID.
+      * `faculty_name` (string, nullable): Faculty owner name.
+      * `decision` (string): "APPROVED", "MODIFICATION_REQUIRED", "REJECTED", "REVIEW_DECLINED".
+      * `previous_status` (string): Paper status prior to review.
+      * `new_status` (string): Resulting status.
+      * `remarks` (string): Official supervisory feedback and instructions.
+      * `required_action` (string): Directive for faculty revision or exam cell printing.
+      * `corrections` (array of objects): Field-level overrides:
+        `[{"question_id": 12, "finding_type": "BLOOM", "original_ai_value": "K2", "corrected_value": "K3", "reason": "Requires algorithmic derivation"}]`.
+      * `created_at` (string): ISO 8601 UTC timestamp.
+      * `updated_at` (string): ISO 8601 UTC timestamp.
+    - Indexes: `paper_id`.
+
+21. `audit_logs`
+    - Purpose: Immutable audit log tracking all operational and security actions.
+    - Fields:
+      * `id` (integer, unique): Sequence identifier.
+      * `action` (string): Event name ("LOGIN", "REGISTER", "UPLOAD", "ANALYZE", "DELETE", "MODERATOR_APPROVED", etc.).
+      * `entity` (string): Entity category ("User", "QuestionPaper", "Subject", etc.).
+      * `entity_type` (string): Entity classification string.
+      * `entity_id` (integer, nullable): Targeted entity sequence ID.
+      * `user_id` (integer, nullable): Initiating user ID.
+      * `user_role` (string, nullable): Initiating user role.
+      * `details` (string): Human-readable narrative description of action.
+      * `metadata_json` / `metadata` (object): Contextual JSON metadata.
+      * `timestamp` (string): ISO 8601 UTC timestamp.
+    - Indexes: Compound index on `(entity_type, entity_id)`, index on `timestamp DESC`.
+
+================================================================================
+5. MACHINE LEARNING, NLP METHODS & SCRUTINY ALGORITHMS (ALL 34 TECHNIQUES)
+================================================================================
+
+Below is the exhaustive mathematical, procedural, and programmatic documentation of every algorithm, ML model, heuristic, and NLP method actively implemented in the project codebase.
+
+--------------------------------------------------------------------------------
+5.1 DOCUMENT TEXT EXTRACTION & OPTICAL CHARACTER RECOGNITION (OCR)
+--------------------------------------------------------------------------------
+
+1. PyMuPDF Layout-Aware Natural Reading Order Extraction with Bounding-Box Coordinate Sorter
+   - Verified File / Function: `backend/app/services/extraction_service.py` -> `DocumentExtractionService._page_text` & `_extract_from_pdf`
+   - Purpose: Extracts clean text from searchable PDF exam papers while preserving multi-column and paragraph layout order.
+   - Algorithmic Procedure:
+     * Standard extraction is attempted first via `page.get_text("text")`.
+     * If plain text is empty, the system falls back to physical block extraction: `page.get_text("blocks")`.
+     * Physical Coordinate Sorting: Each block `b` contains coordinates `(x0, y0, x1, y1, text, block_no, block_type)`. Blocks are sorted top-to-bottom, left-to-right:
+       `sorted(blocks, key=lambda b: (round(b[1], 1), round(b[0], 1)))`
+       where `b[1]` is the vertical y-coordinate and `b[0]` is the horizontal x-coordinate.
+     * Aggregation: Non-empty block text is stripped and joined with newlines; pages are concatenated using `"\n\n".join(text_content).strip()`.
+
+2. Alphanumeric Density Checking & Two-Tier OCR Detection Fallback
+   - Verified File / Function: `backend/app/services/extraction_service.py` -> `DocumentExtractionService._extract_from_pdf` & `_attempt_ocr`
+   - Purpose: Detects scanned or image-only PDFs lacking embedded text layers and performs fallback optical character recognition.
+   - Algorithmic Procedure:
+     * Density Formula: Computes total alphanumeric characters:
+       `alphanumeric_chars = re.sub(r"[^a-zA-Z0-9]", "", combined_text)`
+     * Threshold Check: If `len(alphanumeric_chars) < 30` and `total_pages > 0`, the PDF is classified as scanned/non-selectable.
+     * Tier 1 OCR: Invokes PyMuPDF's C-Tesseract integration:
+       `tp = page.get_textpage_ocr(language="eng", dpi=300)`
+       `text = page.get_text("text", textpage=tp)`
+     * Tier 2 OCR: If Tier 1 yields insufficient text, renders the page pixmap at 2x resolution (`fitz.Matrix(2, 2)`), exports to a temporary PNG file, and executes `pytesseract.image_to_string(img)`.
+     * Failure Defense: If both tiers produce fewer than 30 alphanumeric characters, safely raises `ScannedDocumentException`, preventing corrupted or empty data persistence.
+
+3. python-docx Table Cell Deduplication & Merged-Cell Pipeline
+   - Verified File / Function: `backend/app/services/extraction_service.py` -> `DocumentExtractionService._extract_from_docx`
+   - Purpose: Extracts paragraphs and tables from Word (.docx/.doc) question papers without text duplication caused by merged cells.
+   - Algorithmic Procedure:
+     * Iterates `doc.paragraphs` to collect non-empty body text.
+     * Iterates `doc.tables`. In OOXML tables, horizontally merged cells repeat identical text across columns. The algorithm performs adjacent deduplication:
+       `if not deduped or deduped[-1] != c: deduped.append(c)`
+     * Deduplicated row cells are joined with pipe delimiters: `" | ".join(deduped)`.
+
+4. Multi-Format Curriculum Document Ingestion Engine
+   - Verified File / Function: `backend/app/services/document_service.py` -> `DocumentService.extract_text_from_file`
+   - Purpose: Extracts plaintext from reference curriculum documents (PDF, DOCX, PPTX, TXT, MD) uploaded to subject workspaces.
+   - Algorithmic Procedure:
+     * Dispatches based on file extension:
+       - `.pdf`: PyMuPDF page iterator calling `page.get_text()`.
+       - `.docx`: `docx.Document` iterating `paragraphs`.
+       - `.pptx`: `pptx.Presentation` iterating `slides`, `shapes`, and extracting `shape.text`.
+       - `.txt` / `.md`: Direct UTF-8 stream decoding with replacement for invalid bytes.
+
+--------------------------------------------------------------------------------
+5.2 NLP PARSING & QUESTION STRUCTURE EXTRACTION
+--------------------------------------------------------------------------------
+
+5. Deterministic State-Machine Question Paper Parser
+   - Verified File / Function: `backend/app/services/question_parser.py` -> `QuestionParserService.parse_paper_detailed`
+   - Purpose: Segregates unstructured exam text into an academic hierarchy (Headers, Instructions, Sections, Question Groups, Questions, Subquestions, and Choices) without generative LLM hallucination.
+   - Algorithmic Procedure:
+     * Line-by-line state machine maintaining active context pointers: `current_parent_num`, `current_q_num`, `current_sub_q`, `current_section`, `pending_is_choice`, `is_choice`.
+     * Line Buffering: Accumulates multi-line question text, flushing on section boundaries, group headers, inline subquestions, or "OR" delimiters.
+     * Hierarchy Construction: Emits structured items:
+       - `QUESTION_GROUP`: Major questions declaring group totals (e.g., "Q.1 Solve any four [16]").
+       - `QUESTION`: Standalone questions with individual marks.
+       - `SUBQUESTION`: Child questions under a parent group (e.g., "Q.1(a)", "Q.1(b)").
+     * Parse Confidence Metric: Assigns 0.96 when explicit marks are extracted, 0.72 when marks are unallocated.
+
+6. Lexical Blacklisting & Institutional Regex Pattern Filter
+   - Verified File / Function: `backend/app/services/question_parser.py` -> `QuestionParserService.is_instruction_text` & `is_header_or_footer`
+   - Purpose: Strips administrative headers, candidate notices, and table headers so they are never parsed as questions.
+   - Algorithmic Procedure:
+     * Instruction Matching: Evaluates 33 institutional phrases in `INSTRUCTION_PHRASES` ("all questions are compulsory", "figures to the right indicate", "draw neat diagrams", "use of calculator", "instructions to candidates", "time allowed") and regex `^(?:instructions?(?:\s+to\s+candidates?)?|note|important|general\s+instructions?)\s*[:.\-]?$`.
+     * Header & Footer Matching: Matches 28 phrases in `HEADER_PHRASES` ("autonomous institute", "engineering and technology", "total marks:", "academic year") while protecting actual questions matching `^Q\s*[\.\-]?\s*\d+`.
+     * Table Header Suppression: Skips lines matching 11 header tokens in `TABLE_HEADERS` ("marks", "co", "bl", "marks co bl", "unit no.", "q.no").
+
+7. Multi-Window Regex Metadata Extraction & Token Cleaning
+   - Verified File / Function: `backend/app/services/question_parser.py` -> `QuestionParserService.extract_metadata_and_clean`
+   - Purpose: Scans raw question blocks across 5 sliding windows for marks, Course Outcomes, and Bloom levels, stripping tokens to leave clean question text.
+   - Algorithmic Procedure:
+     * Window 1 (3 Consecutive Lines): Line 1 has Marks, Line 2 has CO, Line 3 has K1–K6 (Confidence: 0.98).
+     * Window 2 (2 Consecutive Lines): Line 1 has Marks & CO, Line 2 has K1–K6 (Confidence: 0.96).
+     * Window 3 (Single-Line Composite): Regex `\[?(\d{1,2})\s*(?:Marks?|M)?\]?\s+\[?(?:CO\s*)?([A-Za-z0-9_]+)\]?\s+\[?(K[1-6])\]?` (Confidence: 0.95).
+     * Window 4 (Standalone Marks Line): Regex `^\[\s*(\d{1,2})\s*(?:Marks?|M)?\s*\]$` or `^\(\s*(\d{1,2})\s*\)$` (Confidence: 0.92).
+     * Window 5 (Trailing Inline Marks): Strips trailing marks `\[?\d+\]?` and metadata `\[?(CO\d+)\]? \[?(K[1-6])\]?` from end of question (Confidence: 0.90).
+     * Normalization: CO codes normalized to uppercase `CO + digit` via `normalize_co_code`; Bloom levels normalized to `K1` through `K6` via `normalize_bloom_level`.
+     * Never invents marks: Returns `marks = None` if unallocated.
+
+8. Two-Pass Relational Question Hierarchy Sorter & Linker
+   - Verified File / Function: `backend/app/services/scrutiny_pipeline.py` -> `extract_and_store_questions`
+   - Purpose: Establishes parent-child relational foreign keys between parent question groups and child subquestions in MongoDB.
+   - Algorithmic Procedure:
+     * Hierarchical Sort Key: Evaluates `(major_number, rank, sub_char, sequence_order)` where `QUESTION_GROUP` has rank 0 and subquestions have rank 1.
+     * Pass 1: Inserts `QUESTION_GROUP` documents into `extracted_questions`, recording generated integer IDs in `parent_id_by_number[parent_num]`.
+     * Pass 2: Inserts child `SUBQUESTION` documents, looking up `parent_id_by_number[parent_num]` to populate `parent_question_id`.
+
+9. Rule-Based Academic Grammar Analysis Engine
+   - Verified File / Function: `backend/app/services/grammar_service.py` -> `GrammarAnalysisService.evaluate_question`
+   - Purpose: Evaluates sentence structure, capitalization, punctuation, article agreement, repeated words, and double negatives on exam statements.
+   - Algorithmic Procedure:
+     * Empty Statement Check: Flags empty text with `FAIL`.
+     * Article Agreement (`a` vs `an`): Checks technical CS words against `VOWEL_WORDS_NEEDING_AN` ("algorithm", "array", "entity", "operating", "interface", "iteration") and `CONSONANT_WORDS_NEEDING_A` ("system", "tree", "binary", "matrix", "network", "protocol"). Flags "a algorithm" or "an system".
+     * Capitalization & Punctuation: Detects missing terminal punctuation (`?`, `.`, `:`) and lowercase starting characters.
+     * Repeated Words: Flags stuttered tokens (`\b(\w+)\s+\1\b`, e.g., "the the", "in in").
+     * Double Negatives: Flags conflicting negative phrases ("don't never", "not without no").
+     * Length & Phrasing: Flags statements with word count < 4 with `WARNING` ("Expand question phrasing for greater clarity").
+
+--------------------------------------------------------------------------------
+5.3 MACHINE LEARNING & SEMANTIC SIMILARITY
+--------------------------------------------------------------------------------
+
+10. Scikit-Learn TF-IDF N-Gram Vectorizer
+    - Verified File / Function: `backend/app/services/similarity_service.py` -> `SimilarityService.find_similar_questions`
+    - Purpose: Transforms question texts into numerical Term Frequency-Inverse Document Frequency feature vectors.
+    - Mathematical Formulation:
+      * Term Frequency: `tf(t, d) = f_{t,d} / \sum_{t' \in d} f_{t',d}`
+      * Inverse Document Frequency: `idf(t, D) = \ln((1 + |D|) / (1 + |{d \in D : t \in d}|)) + 1`
+      * TF-IDF Weight: `tfidf(t, d, D) = tf(t, d) \times idf(t, D)`
+    - Configuration:
+      * `stop_words='english'`: Strips common English stop words.
+      * `ngram_range=(1, 2)`: Captures both unigrams and bigrams (e.g., "binary", "search", "binary search").
+      * Dynamic Corpus: `corpus = [current_question_text] + [all previous question texts for the same subject]`.
+
+11. Pairwise Cosine Similarity Distance Metric
+    - Verified File / Function: `backend/app/services/similarity_service.py` -> `SimilarityService.find_similar_questions`
+    - Purpose: Computes the angle between candidate question vectors and historical question vectors to detect repeated questions.
+    - Mathematical Formulation:
+      * Cosine Similarity:
+        `\text{Cosine Similarity}(u, v) = \frac{u \cdot v}{\|u\|_2 \|v\|_2} = \frac{\sum_{i=1}^n u_i v_i}{\sqrt{\sum_{i=1}^n u_i^2} \sqrt{\sum_{i=1}^n v_i^2}}`
+    - Execution & Filtering:
+      * Evaluates `cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()`.
+      * Threshold: Reads `similarity_threshold` from subject exam pattern (default 0.65 / 65% semantic overlap).
+      * Ranks matches descending by score; formats percentage explanations; returns `top_k = 3` matches.
+
+12. 64-Dimensional L2-Normalized Token Hash Vectorizer
+    - Verified File / Function: `backend/app/services/similarity_service.py` -> `SimilarityService.compute_embedding_vector`
+    - Purpose: Offline token hash embedding generation stored in MongoDB `question_embeddings`.
+    - Mathematical Formulation:
+      * Tokenization: `tokens = [w for w in text.lower().split() if len(w) > 2]`.
+      * Modulo Hashing: For each token, `bin = hash(token) % 64`; increments `vec[bin] += 1.0`.
+      * Euclidean L2 Unit Normalization:
+        `\|v\|_2 = \sqrt{\sum_{i=0}^{63} v_i^2}`
+        `v_{\text{normalized}} = \frac{v}{\|v\|_2} \quad (\text{if } \|v\|_2 > 0)`
+      * Serializes resulting 64-element float vector as JSON array in MongoDB.
+
+--------------------------------------------------------------------------------
+5.4 GENERATIVE AI & LLM INTEGRATION
+--------------------------------------------------------------------------------
+
+13. Google Gemini Structured Academic Scrutiny Prompting
+    - Verified File / Function: `backend/app/services/gemini_service.py` -> `GeminiService._call_gemini_raw` & `_call_gemini_scrutiny`
+    - Purpose: Produces semantic cognitive classifications (Bloom K1–K6), Course Outcome alignment, syllabus unit/topic mappings, and quality checks.
+    - Prompt Architecture:
+      * Controlled Context Injection: Injects Subject Code, Subject Name, Course Outcomes, Syllabus Units and Topics, Active Unit Scope (`selected_units`), and parsed questions payload.
+      * Explicit Negative Constraints:
+        - "You are an academic question-paper scrutiny engine for an autonomous engineering college. You are NOT a generic chatbot."
+        - "Never invent: question text, marks, CO, Bloom level, unit, topic."
+        - "If a value is unavailable, return null."
+        - "Do not change deterministic values unless there is explicit contradictory evidence."
+        - Mandates valid JSON array return without markdown fences or conversational preambles.
+
+14. Markdown Code Fence Sanitizer & Defensive JSON Deserialization
+    - Verified File / Function: `backend/app/services/gemini_service.py` -> `GeminiService._generate_structured_json`
+    - Purpose: Sanitizes LLM outputs by stripping conversational fences before JSON decoding.
+    - Algorithmic Procedure:
+      * Strips leading ````json` or ````, and removes trailing ````.
+      * Executes `json.loads()` with retry backoff (up to `max_retries = 2`).
+      * Encapsulates single JSON dictionary responses into a list to ensure consistent array structures.
+
+15. Pydantic Output Validation & Schema Normalization
+    - Verified File / Function: `backend/app/services/gemini_service.py` -> `AIQuestionAnalysis`
+    - Purpose: Validates schema types and clamps field values before persistence.
+    - Algorithmic Procedure:
+      * Validates each item against `AIQuestionAnalysis`.
+      * Validates Bloom levels against regex `^K[1-6]$`.
+      * Validates Course Outcome codes against regex `^CO\s*\d+$`.
+      * Clamps confidence to `[0.0, 1.0]`: `max(0.0, min(1.0, float(conf)))`.
+
+16. Deterministic Ground-Truth Precedence Hierarchy
+    - Verified File / Function: `backend/app/services/gemini_service.py` -> `analyze_paper_questions` & `scrutiny_pipeline.py`
+    - Purpose: Ensures AI model predictions never overwrite ground-truth data printed on the exam paper.
+    - Hierarchy Order:
+      1. Deterministic parser values (explicit marks, printed CO, printed Bloom).
+      2. Gemini semantic predictions (only fills unprinted metadata).
+      3. Deterministic heuristic fallback (`_semantic_heuristic_analysis`).
+
+--------------------------------------------------------------------------------
+5.5 CURRICULUM, SYLLABUS & CO MAPPING ALGORITHMS
+--------------------------------------------------------------------------------
+
+17. Syllabus Document Regex Extraction & Roman Numeral Normalization
+    - Verified File / Function: `backend/app/api/syllabus.py` -> `parse_syllabus_text`
+    - Purpose: Ingests uploaded syllabus files (PDF/DOCX/TXT) and extracts Course Outcomes, Units, and Topics.
+    - Algorithmic Procedure:
+      * CO Regex Pattern: `^(?:CO|Course Outcome)\s*(\d+)[:.\-]?\s*(.*)$`
+      * Unit Regex Pattern: `^(?:Unit|Module)\s*([IVXLCDM\d]+)[:.\-]?\s*(.*)$`
+      * Roman Numeral Translation: Maps `{"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6, "VII": 7, "VIII": 8}` to integer unit numbers.
+      * Topic Extraction: Cleans bullet delimiters (`^[-*•\d+.)]\s*`) and splits comma-separated topic clauses for strings > 30 characters.
+      * Fallback: If no explicit unit headers match, segments text paragraphs (> 40 chars) into up to 6 units.
+
+18. Two-Tier Weighted Syllabus Keyword Matching Heuristic
+    - Verified File / Function: `backend/app/services/gemini_service.py` -> `_semantic_heuristic_analysis` (Step 3)
+    - Purpose: Matches question text to syllabus units and topics during offline mode or LLM fallback.
+    - Scoring Weights:
+      * Unit Title Word Match (word length > 3 in question text): +2 points.
+      * Unit Topic Word Match (word length > 3 in question text): +3 points.
+    - Evidence Threshold Rule: Combined match score `max_matches` must be >= 3. If `max_matches < 3`, `unit_number` and `topic_name` are set to `None` / `UNMAPPED` to prevent false assignments.
+
+19. Dynamic Selected Unit Syllabus Coverage Rule
+    - Verified File / Function: `backend/app/rules/rule_engine.py` -> `RuleEngine.validate_paper` (Rule 5)
+    - Purpose: Verifies whether the question paper covers all syllabus units configured for that specific examination (e.g. Mid-Sem units 1–2).
+    - Mathematical Formulation:
+      `\text{Unit Coverage \%} = \left( \frac{|\text{Mapped Units} \cap \text{Applicable Units}|}{|\text{Applicable Units}|} \right) \times 100.0`
+    - Threshold: Compares against `min_unit_coverage_pct` (default 80.0%). Emits `PASS` if coverage >= 80%, else `FAIL` detailing uncovered units.
+
+20. Exam Unit Boundary & Out-of-Syllabus Violation Detection Rule
+    - Verified File / Function: `backend/app/rules/rule_engine.py` -> `RuleEngine.validate_paper` (Rule 6)
+    - Purpose: Flags questions drawn from syllabus units outside the declared examination scope.
+    - Algorithmic Procedure:
+      * Inspects questions where `detected_unit_number` is not in `applicable_unit_numbers`.
+      * Emits `FAIL` in category `UNIT_COMPLIANCE` if any violating questions exist, enumerating violating unit numbers in findings.
+      * Emits `PASS` if zero boundary violations occur.
+
+21. Pedagogical Action-Verb Bloom's Taxonomy Classifier
+    - Verified File / Function: `backend/app/services/gemini_service.py` -> `_semantic_heuristic_analysis` (Step 1) & `bloom_service.py`
+    - Purpose: Classifies cognitive demand levels (K1–K6) based on standard Bloom action verbs when unprinted on the paper.
+    - Taxonomy Mapping:
+      * K6 (Create): ["design", "develop", "create", "construct", "formulate"]
+      * K5 (Evaluate): ["evaluate", "justify", "assess", "critique", "which is best"]
+      * K4 (Analyze): ["analyze", "differentiate", "compare", "contrast", "examine", "distinguish"]
+      * K3 (Apply): ["apply", "solve", "calculate", "implement", "compute", "demonstrate", "cipher", "algorithm"]
+      * K2 (Understand): ["explain", "describe", "discuss", "illustrate", "summarize", "why"]
+      * K1 (Remember): Default fallback for factual recall questions.
+
+22. Higher-Order Cognitive Distribution Compliance Rule
+    - Verified File / Function: `backend/app/rules/rule_engine.py` -> `RuleEngine.validate_paper` (Rule 7)
+    - Purpose: Enforces NBA and outcome-based education (OBE) cognitive demand balance.
+    - Mathematical Formulation:
+      `\text{HOTS \%} = \left( \frac{\text{Count}(K3, K4, K5, K6)}{\text{Total Analyzable Questions}} \right) \times 100.0`
+    - Threshold: Mandatory minimum 40.0% Higher-Order Thinking Skills. Emits `PASS` if HOTS >= 40.0%, else `WARNING` ("Paper leans heavily towards lower-level recall questions").
+
+23. Syllabus Course Outcome Description Keyword Overlap Heuristic
+    - Verified File / Function: `backend/app/services/gemini_service.py` -> `_semantic_heuristic_analysis` (Step 2) & `co_mapping_service.py`
+    - Purpose: Maps questions to configured Course Outcomes (COs) when unprinted on the paper.
+    - Algorithmic Procedure:
+      * Extracts distinctive words (`len(w) > 4`) from each configured Course Outcome description.
+      * Computes lexical overlap score:
+        `\text{score} = \sum_{w \in \text{CO Description}} [len(w) > 4 \land w \in \text{Question Text}]`
+      * Threshold Check: `best_score` must be >= 2. If `best_score < 2`, sets `co_code = None` / `UNMAPPED`.
+
+24. Course Outcome (CO) Coverage Verification Rule
+    - Verified File / Function: `backend/app/rules/rule_engine.py` -> `RuleEngine.validate_paper` (Rule 4)
+    - Purpose: Validates that the question paper covers the required percentage of configured Course Outcomes.
+    - Mathematical Formulation:
+      `\text{CO Coverage \%} = \left( \frac{|\text{Mapped COs}|}{|\text{Total Configured COs}|} \right) \times 100.0`
+    - Threshold: Compares against `min_co_coverage_pct` (default 80.0%). Emits `PASS` if coverage >= 80%, else `WARNING`.
+
+--------------------------------------------------------------------------------
+5.6 MARKS EVALUATION, TIMING & SCRUTINY SCORING
+--------------------------------------------------------------------------------
+
+25. Subject-Isolated Historical Bank Deduplication Engine
+    - Verified File / Function: `backend/app/services/scrutiny_pipeline.py` & `similarity_service.py`
+    - Purpose: Detects repeated or paraphrased questions across:
+      * Subject historical previous papers (`previous_questions`).
+      * Other submitted papers under the same subject.
+      * In-paper duplicate questions within the current paper.
+    - Execution: Emits matches where cosine similarity >= configured threshold (default 0.65).
+
+26. Hierarchical Marks Aggregator with Group Capping & Internal-Choice Deduplication
+    - Verified File / Function: `backend/app/rules/rule_engine.py` -> `RuleEngine.validate_paper` (Rule 1)
+    - Purpose: Accurately computes attemptable marks on the question paper, handling parent group caps and optional alternative questions.
+    - Algorithmic Procedure:
+      * Choice Deduplication: Groups alternative questions by `choice_group_id` (e.g., "Q.1_a_choice"). Accumulates only the primary question, skipping the "OR" alternative:
+        `if choice_id in seen_choices: continue; seen_choices.add(choice_id)`
+      * Parent Group Capping: For parent question groups declaring a maximum attempt limit (e.g. "Q.1 [16]" with subquestions a, b, c each worth 8 marks):
+        `g_sum = sum(marks for subquestions in group)`
+        `calculated_marks += min(g_sum, g_cap) if g_cap is not None else g_sum`
+      * Standalone Addition: Adds standalone question marks to the calculated total.
+      * Comparison against `target_total_marks`:
+        - `diff = calculated_marks - target_total_marks`
+        - `PASS`: `diff == 0` (Exact match).
+        - `WARNING`: `abs(diff) <= 5`.
+        - `FAIL`: `abs(diff) > 5`.
+
+27. Question Numbering Sequence & Uniqueness Validation Rule
+    - Verified File / Function: `backend/app/rules/rule_engine.py` -> `RuleEngine.validate_paper` (Rule 2)
+    - Purpose: Detects duplicate, skipped, or missing question numbers.
+    - Verification: Filters out question groups and legitimate internal choices; checks `len(unique_q_numbers) == len(set(unique_q_numbers))`. Emits `PASS` if unique, else `WARNING`.
+
+28. Internal Choice Pattern & Option Balance Rule
+    - Verified File / Function: `backend/app/rules/rule_engine.py` -> `RuleEngine.validate_paper` (Rule 3)
+    - Purpose: Verifies whether internal choices are provided. Emits `PASS` if choice count > 0, else `WARNING`.
+
+29. Cognitive Solving Time Multiplier Model & Duration Check
+    - Verified File / Function: `backend/app/services/solving_time_service.py` & `rule_engine.py` (Rule 8)
+    - Purpose: Estimates student completion duration based on question marks and cognitive complexity.
+    - Mathematical Formulation:
+      * Base Time: `\text{Base Minutes} = \text{Marks} \times 1.5`
+      * Cognitive Multipliers:
+        - K1 (Remember): 1.0x
+        - K2 (Understand): 1.2x
+        - K3 (Apply): 1.5x
+        - K4 (Analyze): 1.7x
+        - K5 (Evaluate): 1.9x
+        - K6 (Create): 2.2x
+      * Formula: `\text{Estimated Time} = \max(\text{round}(\text{Base Minutes} \times \text{Multiplier}), 2)`
+      * Group Capping: Applies proportional scaling to group-capped subquestions.
+      * Duration Check: Emits `PASS` if `estimated_time <= duration_minutes`, else `FAIL` detailing excess minutes.
+
+30. 100-Point Multi-Criteria Weighted Scrutiny Scoring Engine
+    - Verified File / Function: `backend/app/services/report_service.py` -> `ReportService.calculate_score_breakdown`
+    - Purpose: Computes an objective, mathematically transparent 0–100 quality and compliance index.
+    - 9 Weighted Rubric Dimensions (Totaling 100 Points):
+      1. Marks & Pattern Compliance (Max 15 pts): PASS = 15.0, WARNING = 10.0, FAIL = 4.0.
+      2. Question Numbering Consistency (Max 5 pts): PASS = 5.0, WARNING/FAIL = 2.0.
+      3. Bloom's Cognitive Distribution (Max 15 pts): PASS = 15.0, WARNING = 10.0, FAIL = 5.0.
+      4. Course Outcome Coverage (Max 15 pts): PASS = 15.0, WARNING = 10.0, FAIL = 5.0.
+      5. Syllabus Unit Coverage & Compliance (Max 20 pts):
+         - Unit Coverage PASS and Boundary PASS: 20.0 pts.
+         - Exam Unit Boundary FAIL (unselected unit questions present): 8.0 pts.
+         - Coverage Gap FAIL: 10.0 pts.
+         - Partial Coverage: 14.0 pts.
+      6. Grammar & Question Quality (Max 10 pts):
+         - Formula: `\max(3.0, 10.0 - (\text{grammar\_issues} \times 1.5))`
+      7. Similarity / Duplicate Detection (Max 10 pts):
+         - Max similarity < 0.50: 10.0 pts.
+         - 0.50 <= Max similarity < 0.75: 7.0 pts.
+         - Max similarity >= 0.75: 4.0 pts.
+      8. Time Feasibility (Max 5 pts): PASS = 5.0, FAIL = 2.0.
+      9. Internal Choice Pattern (Max 5 pts): PASS = 5.0, WARNING = 3.0.
+    - Rating Classification Bands:
+      * 90.0 – 100.0: "Excellent"
+      * 80.0 – 89.9: "Good"
+      * 70.0 – 79.9: "Needs Review"
+      * 60.0 – 69.9: "Needs Modification"
+      * < 60.0: "Poor / Major Issues"
+
+31. Human-in-the-Loop Decision Support, Moderator Overrides & Supervised Dataset Generation
+    - Verified File / Function: `backend/app/api/moderator.py` -> `submit_moderator_review` & `export_feedback_dataset`
+    - Purpose: Enables human moderators to correct AI findings and exports fine-tuning datasets.
+    - Execution: Atomic updates overwrite `scrutiny_findings.ai_value`. Exports corrections as CSV/JSON containing `(review_id, paper_id, question_id, finding_type, original_ai_value, corrected_value, reason, remarks)`.
+
+32. Automated Scrutiny Report Exporters
+    - Verified File / Function: `backend/app/utils/pdf_export.py` & `backend/app/services/report_service.py`
+    - Purpose: Generates official examination-cell scrutiny documents in PDF, CSV, and JSON formats.
+    - PDF Generation: ReportLab Platypus engine builds multi-page documents featuring institutional headers, metadata grids, score cards, complete question breakdown tables, rule check summaries, and moderator signature blocks.
+
+33. Cross-Subject Mismatch Detection Algorithm
+    - Verified File / Function: `backend/app/services/subject_validation_service.py` -> `validate_paper_subject`
+    - Purpose: Inspects paper text against subject code and distinctive syllabus keywords, blocking mismatched uploads before scrutiny runs.
+
+34. Actionable Defect Recommendation Generation Engine
+    - Verified File / Function: `backend/app/services/recommendation_service.py` -> `ActionableRecommendationService.generate_recommendations`
+    - Purpose: Synthesizes rule defects and cognitive imbalances into plain-English corrective instructions for faculty.
+
+================================================================================
+6. COMPLETE END-TO-END SYSTEM FUNCTIONALITIES (EVERY FEATURE EXPLAINED)
+================================================================================
+
+Below is the complete walkthrough of every functional feature implemented in the application:
+
+1. Institutional College Landing Page & Public Statistics
+   - Route: `/` (`LandingPage.jsx`)
+   - Functionality: Serves as the public institutional landing portal for the examination cell. Displays live aggregate counters fetched from `GET /api/dashboard/public-stats` (total papers scrutinized, active subjects, average institutional scrutiny score, compliance pass rate). Features college branding, overview of scrutiny stages, and navigation to login or registration.
+
+2. Secure User Authentication, Registration & Profile Session
+   - Routes: `/login`, `/register` (`Login.jsx`, `AuthContext.jsx`)
+   - Functionality:
+     * Faculty self-registration via `POST /api/auth/register` creates user accounts with the `FACULTY` role.
+     * JWT login via `POST /api/auth/login` validates email and password against bcrypt hashes.
+     * Profile verification via `GET /api/auth/me` restores user state on page refresh.
+     * Automated session cleanup upon logout or upon receiving a 401 Unauthorized response.
+     * Includes demo fill buttons for rapid role switching in development.
+
+3. Administrator User Access Control & Account Provisioning
+   - Route: `/admin/users` (`UsersAdminPage.jsx`)
+   - Functionality: Restricted to `ADMIN` role via `RoleRoute`. Fetches all accounts via `GET /api/admin/users`. Allows creating new user accounts (`POST /api/admin/users`) with explicit roles (`FACULTY`, `MODERATOR`, `ADMIN`) and departmental assignments. Displays user status, roles, and creation dates.
+
+4. Subject & Curriculum Workspace Management
+   - Route: `/subjects` (`SubjectManagement.jsx`)
+   - Functionality: Course management portal isolating curriculum per subject.
+     * Subject Creation: Administrators and Moderators can create new subjects (`POST /api/subjects`), which automatically provisions default examination patterns.
+     * Unit & Topic Configuration: Faculty can add, edit, or delete syllabus units (`GET/POST/PUT/DELETE /api/subjects/{id}/syllabus`) and granular topics (`POST/DELETE /api/subjects/{id}/syllabus/{unit_id}/topics`).
+     * Course Outcome Configuration: Add and delete Course Outcomes (`GET/POST/DELETE /api/subjects/{id}/cos`).
+     * Examination Pattern Rules: View and adjust target marks, duration, choice rules, and coverage thresholds (`GET/PUT /api/subjects/{id}/rules`).
+
+5. Automated Syllabus Document Ingestion & Parsing
+   - Route: `/syllabus` (`SyllabusUploadPage.jsx`)
+   - Functionality: Upload official syllabus documents in PDF, DOCX, or TXT format via `POST /api/subjects/{id}/syllabus/upload`. The backend regex parser (`parse_syllabus_text`) automatically extracts Course Outcomes (CO1–CO6), syllabus units (translating Roman numerals I–VIII to integers 1–8), and topics, immediately populating the subject workspace. Displays upload status and parsed counts via `GET /api/subjects/{id}/syllabus/status`.
+
+6. Curriculum Document & Lecture Presentation Repository
+   - Accessible via: `/subjects` (`SubjectManagement.jsx`)
+   - Functionality: Upload reference materials (PDF, DOCX, PPTX, Notes) for a subject via `POST /api/subjects/{id}/documents`. The backend extracts plaintext using `DocumentService` for curriculum reference. Documents can be listed and deleted.
+
+7. Question Bank & Previous Exam Paper Repository
+   - Route: `/previous-papers` (`PreviousPapers.jsx`)
+   - Functionality: Subject-specific historical question bank repository.
+     * Upload previous years' examination papers via `POST /api/previous-papers/upload`.
+     * PyMuPDF and python-docx extract questions, store them in `previous_questions`, and compute 64-dimensional hash vectors.
+     * Displays previous papers and their parsed questions via `GET /api/previous-papers?subject_id=`.
+     * Historical papers can be deleted with cascade cleanup (`DELETE /api/previous-papers/{id}`).
+
+8. Question Paper Upload & Validation Pre-Check
+   - Route: `/papers/upload` (`UploadPaper.jsx`)
+   - Functionality:
+     * Faculty selects the subject, academic year, exam type, and active syllabus units (e.g., Units 1 and 2 for Mid-Sem).
+     * Pre-Upload Subject Verification: Runs `POST /api/papers/validate-subject` to verify that the uploaded document matches the chosen subject workspace before submission.
+     * Server-side upload executes `POST /api/papers/upload` with `_save_upload_file` enforcing `MAX_UPLOAD_SIZE_MB` (10 MB).
+     * Extracted text undergoes subject validation. If mismatched, raises HTTP 422 with status `SUBJECT_MISMATCH`. If valid, triggers the scrutiny pipeline and redirects to the scrutiny report page.
+
+9. Comprehensive Question Paper Scrutiny Execution
+   - Service: `backend/app/services/scrutiny_pipeline.py`
+   - Functionality:
+     * Extraction: PyMuPDF / python-docx extracts text; deterministic state-machine parses hierarchy into groups, questions, subquestions, and choices.
+     * Cognitive Mapping: Google Gemini (or offline heuristics) evaluates Bloom levels (K1–K6), Course Outcomes, unit mappings, and grammar.
+     * Similarity Search: Scikit-learn TF-IDF vectorizer + pairwise cosine similarity compares current questions against historical papers, other submitted papers, and in-paper duplicates.
+     * Institutional Rule Checks: `RuleEngine` evaluates 8 rules (Marks, Numbering, Choice, CO Coverage, Unit Coverage, Unit Boundary, Bloom HOTS, Duration).
+     * Scoring: `ReportService` computes 100-point score breakdown.
+     * Persistence: Stores results in `scrutiny_reports`, `rule_results`, `scrutiny_findings`, `similarity_results`, updating paper status to `PENDING_REVIEW`.
+
+10. Interactive Paper Scrutiny Dashboard
+    - Route: `/papers/:id` (`PaperScrutiny.jsx`)
+    - Functionality: Complete scrutiny report viewer.
+      * Header: Subject details, academic year, overall score card, and qualitative rating badge ("Excellent", "Good", "Needs Review").
+      * Scrutiny Rule Status Grid: Visual cards showing pass/fail status for all evaluated institutional checks.
+      * Itemized Question Table: Displays question number, statement, marks, Bloom cognitive level, Course Outcome, unit mapping, grammar status, and actionable recommendations.
+      * Duplicate / Repeat Detection Table: Displays matched historical questions, originating paper titles, and similarity percentages.
+      * Scrutiny Resume / Re-Analyze: Allows restarting analysis if extraction or network errors occurred (`POST /api/papers/{id}/resume`).
+
+11. Moderator Supervision Queue & Review Submission
+    - Routes: `/moderator/queue` (`ModeratorQueuePage.jsx`), `/papers/:id` (`PaperScrutiny.jsx`)
+    - Functionality:
+      * Review Queue: Displays all question papers awaiting scrutiny sign-off across all subjects (`GET /api/papers?status_filter=PENDING_REVIEW`).
+      * Review Submission: Moderators inspect reports and submit decisions (`POST /api/moderator/reviews/{id}`) with options: `APPROVED`, `MODIFICATION_REQUIRED`, `REJECTED`, `REVIEW_DECLINED`.
+      * Inline Field Corrections: Moderators can correct AI-assigned Bloom levels or Course Outcome codes directly within the review modal. Corrections atomically overwrite findings in MongoDB.
+      * Decision caching updates `question_papers` and logs audit events.
+
+12. Moderator Dataset Export & Feedback Loop
+    - Route: `/moderator/feedback` (`FeedbackExport.jsx`)
+    - Functionality: Accessible to Moderators and Admins. Downloads flattened moderator correction records via `GET /api/moderator/feedback/export?format=csv` or `json`. Provides supervised ground-truth datasets for auditing and model fine-tuning.
+
+13. Scrutiny History & Chronological Audit Timeline
+    - Route: `/history` (`PaperHistory.jsx`)
+    - Functionality:
+      * Displays historical question papers with scores, statuses, and moderator feedback (`GET /api/history`). Faculty are restricted to their own submissions.
+      * Chronological Timeline: Clicking a paper fetches `GET /api/history/{id}`, rendering an end-to-end event timeline (Paper Upload -> Scrutiny Execution -> Moderator Reviews -> Audit Logs).
+      * Deletion: Allows deleting papers (`DELETE /api/history/{id}` / `DELETE /api/papers/{id}`) with cascading cleanup of reports, questions, findings, reviews, and disk files (faculty cannot delete APPROVED papers).
+
+14. Multi-Format Scrutiny Report Downloads
+    - Functionality: Export scrutiny reports directly from `/papers/:id` or `/history`:
+      * PDF Export (`GET /api/scrutiny/reports/{id}/export/pdf`): Uses ReportLab to generate an audit-ready multi-page PDF containing institutional headers, score cards, complete question breakdowns, rule checks, and moderator sign-off blocks.
+      * CSV Export (`GET /api/scrutiny/reports/{id}/export/csv`): Comma-separated table for spreadsheet auditing.
+      * JSON Export (`GET /api/scrutiny/reports/{id}/export/json`): Complete machine-readable data payload.
+
+15. Authenticated Dashboard & Analytics
+    - Route: `/dashboard` (`Dashboard.jsx`)
+    - Functionality: Role-tailored operational dashboard (`GET /api/dashboard/stats`).
+      * ScoreCards: Total Papers Scrutinized, Approved Papers, Pending Reviews, Average Scrutiny Score.
+      * Bloom's Taxonomy Cognitive Distribution: Recharts PieChart visualizing K1–K6 question proportions.
+      * Scrutiny Status Summary: Recharts BarChart visualizing status breakdown.
+      * Recent Question Papers Table with direct action buttons.
+
+16. All Question Papers Directory
+    - Route: `/papers` (`PapersListPage.jsx`)
+    - Functionality: Centralized table listing all question papers with search and filtering by subject, academic year, and status.
+
+17. Responsive Layout & Light/Dark Theme Customization
+    - Components: `MainLayout.jsx`, `ThemeToggle.jsx`, `ThemeContext.jsx`
+    - Functionality: Dark and light theme toggle persisted in `localStorage`. Mobile-responsive sidebar navigation with collapsible menus and role-aware navigation links.
+
+================================================================================
+7. COMPREHENSIVE REST API SPECIFICATION
+================================================================================
+
+All API routes are prefixed with `/api`. Authentication requires `Authorization: Bearer <token>` (or `?token=<token>`) unless noted.
+
+--------------------------------------------------------------------------------
+ROOT & SYSTEM HEALTH
+--------------------------------------------------------------------------------
+- GET `/`
+  * Auth: None
+  * Response: `{"status": "online", "app": "...", "database": "connected", "ai_provider": "gemini|mock", "docs": "/docs"}`
+
+--------------------------------------------------------------------------------
+AUTHENTICATION & USERS (`/api/auth`, `/api/admin/users`, `/api/users`)
+--------------------------------------------------------------------------------
+- POST `/api/auth/login`
+  * Auth: None
+  * Request: JSON `{"email": "faculty@college.edu", "password": "..."}`
+  * Response: `Token` `{"access_token": "...", "token_type": "bearer", "user": UserOut}`
+  * Logic: Validates bcrypt password; checks `is_active`; logs `LOGIN` audit.
+- POST `/api/auth/register`
+  * Auth: None
+  * Request: JSON `{"email": "...", "full_name": "...", "password": "...", "department": "..."}`
+  * Response: HTTP 201 `UserOut`
+  * Logic: Self-registration for `FACULTY` role; hashes password with bcrypt.
+- GET `/api/auth/me`
+  * Auth: Authenticated
+  * Response: `UserOut` current user profile.
+- GET `/api/admin/users`
+  * Auth: `ADMIN`
+  * Response: List of `UserOut` records.
+- POST `/api/admin/users`
+  * Auth: `ADMIN`
+  * Request: JSON `{"email": "...", "full_name": "...", "password": "...", "role": "FACULTY|MODERATOR|ADMIN", "department": "..."}`
+  * Response: HTTP 201 `UserOut`
+
+--------------------------------------------------------------------------------
+SUBJECTS & CURRICULUM (`/api/subjects`)
+--------------------------------------------------------------------------------
+- GET `/api/subjects`
+  * Auth: Authenticated
+  * Response: List of subjects with unit counts and CO counts.
+- POST `/api/subjects`
+  * Auth: `ADMIN`, `MODERATOR`
+  * Request: JSON `SubjectCreate` (code, name, department, semester, total_marks, duration_minutes).
+  * Response: HTTP 201 Created subject + provisions default `examination_patterns`.
+- GET `/api/subjects/{id}`
+  * Auth: Authenticated
+  * Response: Subject record.
+- GET `/api/subjects/{id}/syllabus`
+  * Auth: Authenticated
+  * Response: List of `syllabus_units` with embedded `topics`.
+- POST `/api/subjects/{id}/syllabus`
+  * Auth: Authenticated
+  * Request: JSON `{"unit_number": 1, "title": "...", "description": "..."}`
+  * Response: HTTP 201 Created unit.
+- PUT `/api/subjects/{id}/syllabus/{unit_id}`
+  * Auth: Authenticated
+  * Request: JSON updated unit fields.
+- DELETE `/api/subjects/{id}/syllabus/{unit_id}`
+  * Auth: Authenticated
+  * Logic: Deletes unit and related `syllabus_topics`.
+- POST `/api/subjects/{id}/syllabus/{unit_id}/topics`
+  * Auth: Authenticated
+  * Request: JSON `{"topic_name": "...", "description": "..."}`
+- DELETE `/api/subjects/{id}/syllabus/{unit_id}/topics/{topic_id}`
+  * Auth: Authenticated
+- GET `/api/subjects/{id}/cos`
+  * Auth: Authenticated
+  * Response: List of `course_outcomes` for subject.
+- POST `/api/subjects/{id}/cos`
+  * Auth: Authenticated
+  * Request: JSON `{"co_code": "CO1", "description": "..."}`
+- DELETE `/api/subjects/{id}/cos/{co_id}`
+  * Auth: Authenticated
+- GET `/api/subjects/{id}/rules`
+  * Auth: Authenticated
+  * Response: `examination_patterns` record.
+- PUT `/api/subjects/{id}/rules`
+  * Auth: `ADMIN`, `MODERATOR`
+  * Request: JSON updated thresholds (total_marks, duration, coverage percentages, similarity threshold).
+- GET `/api/subjects/{id}/documents`
+  * Auth: Authenticated
+  * Response: List of curriculum `subject_documents`.
+- POST `/api/subjects/{id}/documents`
+  * Auth: Authenticated
+  * Request: Multipart/form-data (title, doc_type, file). Extracts text via `DocumentService`.
+- DELETE `/api/subjects/{id}/documents/{doc_id}`
+  * Auth: Authenticated
+  * Logic: Removes database record and deletes physical file.
+
+--------------------------------------------------------------------------------
+SYLLABUS DOCUMENT INGESTION (`/api/subjects/{id}/syllabus`)
+--------------------------------------------------------------------------------
+- POST `/api/subjects/{id}/syllabus/upload`
+  * Auth: `FACULTY`, `MODERATOR`, `ADMIN`
+  * Request: Multipart/form-data (file: PDF/DOCX/TXT, academic_year).
+  * Logic: Extracts text; executes `parse_syllabus_text` regex; inserts units, topics, and COs; records `syllabus_documents`.
+- GET `/api/subjects/{id}/syllabus/status`
+  * Auth: Authenticated
+  * Response: Extraction status, document metadata, extracted unit and CO counts.
+- DELETE `/api/subjects/{id}/syllabus/documents/{doc_id}`
+  * Auth: `ADMIN`, `MODERATOR`
+
+--------------------------------------------------------------------------------
+QUESTION PAPERS & VALIDATION (`/api/papers`)
+--------------------------------------------------------------------------------
+- GET `/api/papers`
+  * Auth: Authenticated (Faculty filtered to own papers; Moderator/Admin see all).
+  * Query Params: `subject_id`, `status_filter`.
+  * Response: List of `PaperOut` records with subject and moderator review summaries.
+- GET `/api/papers/{id}`
+  * Auth: Authenticated (Owner faculty or Moderator/Admin).
+  * Response: Full `PaperOut` including complete questions list, subject, and moderator review.
+- POST `/api/papers/validate-subject`
+  * Auth: Authenticated
+  * Request: Multipart/form-data (subject_id, file).
+  * Logic: Temporary extraction and subject mismatch check without database persistence.
+- POST `/api/papers/upload`
+  * Auth: `FACULTY`, `MODERATOR`, `ADMIN`
+  * Request: Multipart/form-data (title, subject_id, academic_year, exam_type, selected_units, auto_analyze, file).
+  * Logic: Enforces `MAX_UPLOAD_SIZE_MB`; saves file; extracts structure; validates subject match; executes scrutiny pipeline if `auto_analyze=True`.
+- POST `/api/papers/{id}/analyze`
+  * Auth: Authenticated (Owner faculty or Moderator/Admin).
+  * Logic: Re-extracts questions if missing; executes scrutiny pipeline.
+- POST `/api/papers/{id}/resume`
+  * Auth: Authenticated (Alias for `/analyze`).
+- PATCH `/api/papers/{id}/units`
+  * Auth: `FACULTY`, `MODERATOR`, `ADMIN`
+  * Request: JSON `{"selected_units": [1, 2]}`.
+- DELETE `/api/papers/{id}`
+  * Auth: Authenticated (Owner faculty if not APPROVED, or Moderator/Admin).
+  * Logic: Cascade deletion of questions, reports, rule results, findings, similarity results, reviews, and disk files.
+
+--------------------------------------------------------------------------------
+HISTORICAL QUESTION BANK (`/api/previous-papers`)
+--------------------------------------------------------------------------------
+- GET `/api/previous-papers`
+  * Auth: Authenticated
+  * Query Params: `subject_id` (required).
+  * Response: List of previous papers with nested `previous_questions`.
+- POST `/api/previous-papers/upload`
+  * Auth: `FACULTY`, `MODERATOR`, `ADMIN`
+  * Request: Multipart/form-data (subject_id, title, academic_year, exam_type, file).
+  * Logic: Extracts questions; computes 64-dim hash embeddings; stores in `previous_papers` and `previous_questions`.
+- DELETE `/api/previous-papers/{id}`
+  * Auth: Authenticated
+  * Logic: Cascade deletes historical questions, embeddings, and disk file.
+
+--------------------------------------------------------------------------------
+SCRUTINY REPORTS & EXPORTS (`/api/scrutiny`, `/api/reports`)
+--------------------------------------------------------------------------------
+- GET `/api/scrutiny/{paper_id}`
+  * Auth: Authenticated (Owner faculty or Moderator/Admin).
+  * Response: Latest `ScrutinyReportResponse` with `rule_results`, `findings`, and `similarity_results`.
+- GET `/api/scrutiny/reports/{paper_id}/export/pdf`
+  * Auth: Authenticated
+  * Response: Binary `application/pdf` stream of ReportLab-generated audit report.
+- GET `/api/scrutiny/reports/{paper_id}/export/csv`
+  * Auth: Authenticated
+  * Response: `text/csv` stream of question breakdowns and rule evaluations.
+- GET `/api/scrutiny/reports/{paper_id}/export/json`
+  * Auth: Authenticated
+  * Response: `application/json` full data payload.
+
+--------------------------------------------------------------------------------
+MODERATOR SUPERVISION & FEEDBACK (`/api/moderator`)
+--------------------------------------------------------------------------------
+- POST `/api/moderator/reviews/{paper_id}`
+  * Auth: `MODERATOR`, `ADMIN`
+  * Request: JSON `ModeratorReviewCreate` (decision: APPROVED|MODIFICATION_REQUIRED|REJECTED|REVIEW_DECLINED, remarks, required_action, corrections[]).
+  * Logic: Validates decision; overwrites findings for corrections; updates paper status; logs audit event.
+- GET `/api/moderator/reviews/{paper_id}`
+  * Auth: Authenticated (Owner faculty or Moderator/Admin).
+  * Response: Latest moderator review record and supervisory remarks.
+- GET `/api/moderator/feedback/export`
+  * Auth: `MODERATOR`, `ADMIN`
+  * Query Params: `format=csv|json`.
+  * Response: Flattened dataset of all moderator corrections.
+
+--------------------------------------------------------------------------------
+HISTORY & TIMELINE (`/api/history`)
+--------------------------------------------------------------------------------
+- GET `/api/history`
+  * Auth: Authenticated (Faculty restricted to own submissions; Moderator/Admin see all).
+  * Query Params: optional `subject_id`.
+  * Response: List of historical papers with overall score, status, and moderator remarks.
+- GET `/api/history/{paper_id}`
+  * Auth: Authenticated
+  * Response: Full timeline object containing `paper_info`, `reports_history`, `moderator_reviews`, and chronological `audit_timeline`.
+- DELETE `/api/history/{paper_id}`
+  * Auth: Authenticated (Delegates to paper deletion with cascade).
+
+--------------------------------------------------------------------------------
+DASHBOARD & ANALYTICS (`/api/dashboard`)
+--------------------------------------------------------------------------------
+- GET `/api/dashboard/public-stats`
+  * Auth: None
+  * Response: Public aggregate statistics for the landing page.
+- GET `/api/dashboard/stats`
+  * Auth: Authenticated
+  * Response: Role-tailored metrics, Bloom's cognitive distribution pie chart data, status distribution bar chart data, and recent papers.
+
+================================================================================
+8. CODEBASE STRUCTURE & FILE-BY-FILE DIRECTORY
+================================================================================
+
+Below is the directory map and functional explanation of all primary files across the project:
+
+ai-question-paper-scrutiny/
+├── backend/                               Backend root
+│   ├── app/                               Application source code
+│   │   ├── main.py                        FastAPI entry point, lifespan, CORS, router registrations, health root
+│   │   ├── core/
+│   │   │   ├── config.py                  Pydantic Settings, `.env` parsing, secrets validation, directory paths
+│   │   │   ├── security.py                Password hashing (bcrypt), JWT creation & decoding helpers
+│   │   │   └── dependencies.py            FastAPI Depends: `get_current_user`, `require_role`, `MongoUser`
+│   │   ├── db/
+│   │   │   ├── mongo.py                   PyMongo connection pool, `get_db`, `get_next_sequence`, serializers, indexes
+│   │   │   └── migrate_to_mongo.py        Utility script copying legacy SQLite `scrutiny.db` to MongoDB if needed
+│   │   ├── api/                           API Routers
+│   │   │   ├── auth.py                    Login, registration, profile (`/api/auth`)
+│   │   │   ├── users.py                   Admin user management (`/api/admin/users`)
+│   │   │   ├── subjects.py                Subjects, syllabus units, topics, COs, documents (`/api/subjects`)
+│   │   │   ├── syllabus.py                Syllabus file upload, regex parser, status (`/api/subjects/{id}/syllabus`)
+│   │   │   ├── rules_config.py            Examination pattern configuration (`/api/subjects/{id}/rules`)
+│   │   │   ├── papers.py                  Paper CRUD, upload, validation, analyze, resume (`/api/papers`)
+│   │   │   ├── questions.py               Extracted questions query (`/api/questions`)
+│   │   │   ├── previous_papers.py         Historical paper upload, question bank query (`/api/previous-papers`)
+│   │   │   ├── scrutiny.py                Scrutiny report retrieval, PDF/CSV/JSON export (`/api/scrutiny`)
+│   │   │   ├── reports.py                 Scrutiny report aliases and decision fallback (`/api/reports`)
+│   │   │   ├── moderator.py               Review submission, feedback export dataset (`/api/moderator`)
+│   │   │   ├── history.py                 Paper scrutiny history, chronological audit timeline (`/api/history`)
+│   │   │   ├── dashboard.py               Public and authenticated dashboard metrics (`/api/dashboard`)
+│   │   │   └── examinations.py            Examination configuration (`/api/examinations`)
+│   │   ├── services/                      Business logic & processing engines
+│   │   │   ├── scrutiny_pipeline.py       Central pipeline: extract, parse, AI mapping, similarity, rules, score
+│   │   │   ├── extraction_service.py      PyMuPDF & python-docx extraction, density checks, two-tier OCR fallback
+│   │   │   ├── question_parser.py         Deterministic state-machine parser, lexical blacklist, 5-window metadata
+│   │   │   ├── gemini_service.py          Google Gemini SDK caller, prompt stuffing, offline heuristic fallback
+│   │   │   ├── similarity_service.py      TF-IDF n-gram vectorizer, pairwise cosine similarity, 64-dim token hasher
+│   │   │   ├── rule_engine.py             8 scrutiny rules: Marks, Numbering, Choice, CO, Unit, Boundary, Bloom, Duration
+│   │   │   ├── report_service.py          100-point multi-criteria weighted scoring engine, CSV/JSON export
+│   │   │   ├── subject_validation_service.py Cross-subject mismatch detection, code & keyword matching
+│   │   │   ├── grammar_service.py         Academic grammar analyzer: articles (a/an), capitalization, punctuation, repeats
+│   │   │   ├── bloom_service.py           Bloom action-verb classification service
+│   │   │   ├── co_mapping_service.py      Course Outcome keyword overlap matching service
+│   │   │   ├── solving_time_service.py    Cognitive solving time estimation service (1.0x–2.2x multipliers)
+│   │   │   ├── quality_service.py         Question quality evaluation service
+│   │   │   ├── recommendation_service.py  Actionable defect recommendation generator
+│   │   │   ├── document_service.py        Multi-format curriculum file extraction (PDF, DOCX, PPTX, TXT)
+│   │   │   ├── syllabus_service.py        Syllabus management helper service
+│   │   │   ├── audit_service.py           Immutable audit logging service recording to `audit_logs`
+│   │   │   └── history_service.py         Paper history aggregator helper service
+│   │   ├── prompts/                       Academic prompt definitions
+│   │   │   └── prompts.py                 Structured prompts for Gemini LLM scrutiny
+│   │   ├── schemas/
+│   │   │   └── schemas.py                 Pydantic v2 schemas for all API requests and responses
+│   │   ├── models/
+│   │   │   └── models.py                  Python Enum definitions (`UserRole`, `PaperStatus`, `RuleStatus`)
+│   │   └── utils/
+│   │       └── pdf_export.py              ReportLab Platypus PDF generator building audit-ready scrutiny reports
+│   ├── tests/                             Automated test suite (pytest)
+│   │   ├── test_auth.py                   Authentication and JWT tests
+│   │   ├── test_rule_engine.py            Marks capping and numbering rule validation tests
+│   │   ├── test_scrutiny.py               End-to-end scrutiny pipeline and scoring tests
+│   │   ├── test_parser_regression.py      Parser edge cases and metadata extraction regression tests
+│   │   └── test_features_e2e.py           Full API integration and subject isolation tests
+│   ├── requirements.txt                   Python pip dependency declarations
+│   └── uploads/                           Local filesystem storage for uploaded papers and syllabi
+│
+├── frontend/                              Frontend root (React 18 + Vite)
+│   ├── index.html                         HTML document root with inline theme boot script
+│   ├── package.json                       NPM dependencies and build scripts
+│   ├── vite.config.js                     Vite configuration, React plugin, port 3000, `/api` proxy to port 8000
+│   ├── tailwind.config.js                 Tailwind CSS dark mode class configuration and brand color tokens
+│   ├── postcss.config.js                  PostCSS and Autoprefixer configuration
+│   └── src/                               Source code
+│       ├── main.jsx                       React bootstrap, DOM mount, ThemeProvider
+│       ├── App.jsx                        Routing tree, lazy components, `ProtectedRoute`, `RoleRoute`
+│       ├── index.css                      Tailwind directives and global theme styles
+│       ├── layouts/
+│       │   └── MainLayout.jsx             Responsive sidebar, header, role-aware navigation links, theme toggle
+│       ├── context/
+│       │   ├── AuthContext.jsx            User authentication state, JWT storage, login, logout, profile fetch
+│       │   └── ThemeContext.jsx           Dark/Light mode state management and localStorage persistence
+│       ├── services/
+│       │   └── api.js                     Axios client with Bearer token interceptor and 401 redirect
+│       ├── utils/
+│       │   └── exportUtils.js             Authenticated blob download helpers for PDF, CSV, and JSON
+│       ├── components/common/
+│       │   ├── Badge.jsx                  Status badge with variant colors (PASS, FAIL, WARNING, APPROVED, etc.)
+│       │   ├── ScoreCard.jsx              Metric card with icons and values
+│       │   ├── ConfirmModal.jsx           Accessible confirmation modal for deletions
+│       │   └── ThemeToggle.jsx            Sun/Moon theme toggle button
+│       └── pages/                         User interface pages
+│           ├── LandingPage.jsx            Public college homepage with public scrutiny statistics
+│           ├── Login.jsx                  User authentication and self-registration page with demo quick-fills
+│           ├── Dashboard.jsx              Role-tailored metrics, Bloom's pie chart, status bar chart
+│           ├── PapersListPage.jsx         Master table of all uploaded question papers with filtering
+│           ├── UploadPaper.jsx            Paper upload form with pre-upload subject verification
+│           ├── SyllabusUploadPage.jsx     Syllabus document upload and regex parsing status
+│           ├── PaperScrutiny.jsx          Complete scrutiny report viewer, findings, and moderator review modal
+│           ├── ModeratorQueuePage.jsx     Review queue for moderators to inspect papers awaiting sign-off
+│           ├── FeedbackExport.jsx         Dataset export page for downloading moderator corrections
+│           ├── PaperHistory.jsx           Scrutiny history table and chronological audit timeline
+│           ├── SubjectManagement.jsx      Subject, unit, topic, CO, and examination rule management workspace
+│           ├── PreviousPapers.jsx         Historical question bank upload and browsing workspace
+│           └── UsersAdminPage.jsx         Administrator user management page for creating and listing accounts
+│
+├── scripts/
+│   ├── seed_data.py                       Seeds initial administrator, moderator, and faculty accounts in MongoDB
+│   └── generate_demo_syllabus.py          Generates mock syllabus documents for demonstration testing
+└── notes.txt                              Comprehensive Master Technical Study Document (this document)
+
+================================================================================
+9. SYSTEM CONFIGURATION, ENVIRONMENT VARIABLES & EXECUTION GUIDE
+================================================================================
+
+9.1 ENVIRONMENT VARIABLES (`.env`)
+The backend loads configuration via Pydantic BaseSettings from `backend/.env` and system environment variables:
+
+Variable: `MONGODB_URI`
+- Description: MongoDB connection URI string.
+- Default: `mongodb://localhost:27017`
+- Requirement: Required for database connectivity.
+
+Variable: `MONGODB_DB_NAME`
+- Description: Target MongoDB database name.
+- Default: `question_paper_scrutiny`
+
+Variable: `JWT_SECRET`
+- Description: Secret key for signing and verifying HMAC-SHA256 JWT tokens.
+- Default: Random 48-character token generated per process in development.
+- Production Requirement: Must be set to a persistent secret of at least 32 characters.
+
+Variable: `JWT_ALGORITHM`
+- Description: Cryptographic signing algorithm.
+- Default: `HS256`
+
+Variable: `ACCESS_TOKEN_EXPIRE_MINUTES`
+- Description: Token validity lifetime in minutes.
+- Default: `1440` (24 hours).
+
+Variable: `AI_PROVIDER`
+- Description: Semantic analysis provider. Options: `gemini` (Google Gemini LLM) or `mock` (deterministic offline heuristics).
+- Default: `mock`
+
+Variable: `GEMINI_API_KEY`
+- Description: Google Gemini API key.
+- Requirement: Required only when `AI_PROVIDER=gemini`.
+
+Variable: `GEMINI_MODEL`
+- Description: Gemini model name.
+- Default: `gemini-1.5-flash` or `gemini-2.5-flash`.
+
+Variable: `UPLOAD_DIR`
+- Description: Local filesystem directory for storing uploaded exam papers and syllabi.
+- Default: `backend/uploads`
+
+Variable: `MAX_UPLOAD_SIZE_MB`
+- Description: Maximum allowable file upload size in megabytes.
+- Default: `10`
+
+Variable: `CORS_ORIGINS`
+- Description: Comma-separated list of whitelisted frontend origins.
+- Default: `http://localhost:3000,http://127.0.0.1:3000`
+
+9.2 STEP-BY-STEP INSTALLATION & RUNNING INSTRUCTIONS
+
+Step 1: Ensure MongoDB is running
+  Start the local MongoDB service:
+  `net start MongoDB`   (on Windows)
+  Verify it is listening on `mongodb://localhost:27017`.
+
+Step 2: Backend Dependencies & Environment Setup
+  Open a terminal in the project directory:
+  `cd backend`
+  `pip install -r requirements.txt`
+  Ensure PyMongo is installed:
+  `pip install pymongo`
+  Create a `.env` file from `.env.example` if not already present:
+  `copy .env.example .env`
+  Configure `GEMINI_API_KEY` and set `AI_PROVIDER=gemini` if Gemini integration is desired; otherwise leave `AI_PROVIDER=mock`.
+
+Step 3: Database Seeding
+  Run the seed script from the root workspace to provision default institutional role accounts:
+  `python scripts/seed_data.py`
+  This provisions three default accounts:
+  - Administrator: `admin@college.edu`
+  - Moderator: `moderator@college.edu`
+  - Faculty: `faculty@college.edu`
+
+Step 4: Start Backend API Server
+  `cd backend`
+  `python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload`
+  Verify health at `http://localhost:8000/`.
+  Interactive Swagger documentation is available at `http://localhost:8000/docs`.
+
+Step 5: Frontend Dependencies & Dev Server
+  Open a second terminal in the project directory:
+  `cd frontend`
+  `npm install`
+  `npm run dev`
+  The frontend application runs at `http://localhost:3000/`.
+
+Step 6: Running Automated Tests
+  `cd backend`
+  `pytest`
+
+Step 7: Production Frontend Build (Optional)
+  `cd frontend`
+  `npm run build`
+  `npm run preview`
+
+================================================================================
+END OF MASTER TECHNICAL SPECIFICATION & COMPREHENSIVE ENGINEERING REFERENCE
+================================================================================

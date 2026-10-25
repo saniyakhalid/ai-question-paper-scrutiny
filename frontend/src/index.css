@@ -1,0 +1,71 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600;700&family=Source+Sans+3:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root,
+html.light {
+  --surface: 250 248 245;
+  --surface-raised: 255 255 255;
+  --surface-muted: 241 245 249;
+  --ink: 30 41 59;
+  --ink-muted: 71 85 105;
+  --ink-faint: 100 116 139;
+  --line: 226 232 240;
+  --accent: 227 38 54;
+  --accent-soft: 254 242 242;
+  color-scheme: light;
+}
+
+html.dark {
+  --surface: 250 248 245;
+  --surface-raised: 255 255 255;
+  --surface-muted: 241 245 249;
+  --ink: 30 41 59;
+  --ink-muted: 71 85 105;
+  --ink-faint: 100 116 139;
+  --line: 226 232 240;
+  --accent: 227 38 54;
+  --accent-soft: 254 242 242;
+  color-scheme: light;
+}
+
+body {
+  @apply font-sans antialiased;
+  background-color: rgb(var(--surface));
+  color: rgb(var(--ink));
+}
+
+.glass-card {
+  @apply backdrop-blur-md border shadow-sm rounded-xl;
+  background-color: rgb(var(--surface-raised) / 0.92);
+  border-color: rgb(var(--line));
+}
+
+.theme-page {
+  @apply transition-colors duration-200;
+  background-color: rgb(var(--surface));
+  color: rgb(var(--ink));
+}
+
+.theme-panel {
+  @apply rounded-2xl border transition-colors;
+  background-color: rgb(var(--surface-raised) / 0.92);
+  border-color: rgb(var(--line));
+}
+
+.theme-muted {
+  color: rgb(var(--ink-muted));
+}
+
+.theme-input {
+  @apply w-full rounded-xl px-4 py-2.5 text-sm border focus:outline-none;
+  background-color: rgb(var(--surface-muted));
+  border-color: rgb(var(--line));
+  color: rgb(var(--ink));
+}
+
+.theme-input:focus {
+  border-color: rgb(var(--accent));
+}

@@ -1,0 +1,816 @@
+================================================================================
+AI-BASED INTELLIGENT QUESTION PAPER SCRUTINY DECISION SUPPORT SYSTEM (DSS)
+COMPLETE PROJECT TECHNICAL DOCUMENTATION (CURRENT IMPLEMENTATION)
+================================================================================
+
+PROJECT DIRECTORY: C:\Users\DELL\.gemini\antigravity\scratch\ai-question-paper-scrutiny
+DOCUMENT PURPOSE: Exhaustive technical specification and codebase master reference for the CURRENT running system. Source of truth is source code, not comments, TODOs, or unused files.
+APP VERSION (FastAPI): 2.0.0  (settings.VERSION still defaults to 1.0.0 in config.py)
+EXISTING PRIOR DOC: The previous specification lived in `note.txt` (this file was originally named that way). This document replaces that specification for the current MongoDB + Gemini-capable architecture.
+
+--------------------------------------------------------------------------------
+    1. SYSTEM OVERVIEW & CORE PHILOSOPHY
+--------------------------------------------------------------------------------
+The AI-Based Intelligent Question Paper Scrutiny Decision Support System (DSS) is a web application for autonomous engineering colleges and examination cells.
+
+Key Objectives (implemented):
+- Automate quality assurance and scrutiny of college question papers before examinations.
+- Enforce institutional scrutiny rules (total marks, numbering, duration, internal choice, CO coverage, unit coverage, Bloom distribution).
+- Evaluate Bloom's Taxonomy cognitive levels (K1–K6 / Remember through Create).
+- Validate Course Outcome (CO) mapping and syllabus unit coverage.
+- Perform unit-boundary compliance (flags questions mapped to units not selected for that exam).
+- Compare uploaded questions against a SAME-SUBJECT historical question bank using TF-IDF cosine similarity (not a dedicated vector DB).
+- Human-in-the-loop moderator supervision: review AI evidence, optionally correct findings, record decisions (APPROVED, MODIFICATION_REQUIRED, REJECTED), export PDF/CSV/JSON.
+- Multi-subject workspace isolation: syllabus, COs, units, documents, previous papers, and exam rules are keyed by subject_id. Similarity search is filtered by subject_id.
+- Seed starts with user accounts only (no hardcoded mock subjects). Curriculum is teacher/admin configured, including unit add/edit/delete, topics, PPT/document upload, and syllabus file upload with regex parsing.
+
+What this is NOT:
+- Not a fully autonomous auto-approver. Moderators make the official decision.
+- Not a RAG vector database (no Chroma/Pinecone/FAISS). Gemini (when enabled) receives syllabus/CO text in the prompt. Fallback is keyword heuristics.
+- Stored 64-dimension hash embeddings on previous questions are written at previous-paper upload time but the live similarity search uses sklearn TfidfVectorizer on question text, not those stored vectors.
+
+--------------------------------------------------------------------------------
+    2. SYSTEM ARCHITECTURE & TECHNICAL STACK
+--------------------------------------------------------------------------------
+Architecture Pattern: Decoupled REST API (FastAPI backend) + React (Vite) SPA frontend.
+
+BACKEND (ACTIVE RUNTIME):
+- Language: Python 3
+- Framework: FastAPI (ASGI), Uvicorn on port 8000
+- Database: MongoDB via PyMongo (`MONGODB_URI`, database name `question_paper_scrutiny` by default)
+- Integer IDs: MongoDB `counters` collection (`get_next_sequence`) so frontend routes like `/papers/3` still use integers
+- Validation: Pydantic v2
+- Auth: JWT via `python-jose` (`jose.jwt`), bcrypt via Passlib, OAuth2 Bearer (`OAuth2PasswordBearer`)
+- Document extraction: PyMuPDF (`fitz` / `pymupdf`) for PDF; `python-docx` for DOCX; UTF-8 text for TXT
+- Optional PPTX text extraction in `document_service.py` via `python-pptx` (try/import; not listed in requirements.txt)
+- Similarity: scikit-learn `TfidfVectorizer` + `cosine_similarity`; numpy for 64-dim hash embedding generation
+- Reports: ReportLab PDF (`app/utils/pdf_export.py`); CSV/JSON via `report_service`
+- AI: Google Gemini through `google.generativeai` when `AI_PROVIDER=gemini` and `GEMINI_API_KEY` is set; otherwise deterministic heuristic in `gemini_service.py`
+
+BACKEND (PRESENT IN REPO BUT NOT THE LIVE DATA PATH):
+- SQLAlchemy 2 + SQLite (`app/db/database.py`, `app/models/models.py`, `app/db/init_db.py`) — leftover ORM schema and SQLite migration helpers. FastAPI `app/main.py` lifespan connects to MongoDB only; API modules use `get_db` from `app.db.mongo`, not SQLAlchemy `SessionLocal`.
+- Alembic, psycopg2-binary listed in requirements.txt but not wired as the running store.
+
+FRONTEND:
+- JavaScript (ES6+), React 18
+- Vite 5, port 3000, proxies `/api` to `http://localhost:8000`
+- React Router DOM v6
+- Tailwind CSS; light/dark theme (`ThemeContext`, default dark, persisted in localStorage)
+- lucide-react icons
+- recharts charts on dashboard
+- axios HTTP client (`frontend/src/services/api.js`): baseURL `/api`, 180s timeout, Bearer token from localStorage, 401 redirects to `/login`
+
+PORT MAPPING:
+- Backend: http://localhost:8000  (Swagger `/docs`, ReDoc `/redoc`, health GET `/`)
+- Frontend: http://localhost:3000/
+
+--------------------------------------------------------------------------------
+    3. DATABASE (CURRENT: MONGODB)
+--------------------------------------------------------------------------------
+Engine: MongoDB
+Default URI: mongodb://localhost:27017
+Default DB name: question_paper_scrutiny
+Access module: backend/app/db/mongo.py
+Helpers: get_mongo_client, get_mongo_db, get_db, get_next_sequence, serialize_doc, serialize_docs, init_mongo_indexes
+
+ID STRATEGY:
+- Documents keep Mongo `_id` plus an integer `id` from `counters` (sequence name per collection).
+- serialize_doc converts ObjectId and datetime to JSON-friendly strings.
+
+INDEXES (init_mongo_indexes):
+- users: unique email; unique sparse id
+- subjects: unique code; unique sparse id
+- syllabus_units: (subject_id, unit_number)
+- syllabus_documents: subject_id
+- question_papers: unique sparse id; subject_id; uploaded_by_id; status
+- extracted_questions: unique sparse id; paper_id; sequence_order
+- scrutiny_reports: unique sparse id; (paper_id, version DESC)
+- rule_results: report_id
+- scrutiny_findings: (report_id, question_id)
+- similarity_results: report_id
+- moderator_reviews: paper_id
+- audit_logs: (entity_type, entity_id); timestamp DESC
+
+COLLECTIONS AND TYPICAL FIELDS (as written by current APIs/pipeline):
+
+1. counters
+   - `_id`: sequence name (e.g. "users", "question_papers")
+   - `seq`: integer
+
+2. users
+   - id, email, hashed_password, full_name, role (FACULTY | MODERATOR | ADMIN), department, is_active, created_at
+
+3. subjects
+   - id, code, name, department, branch, semester, total_marks, duration_minutes (and other SubjectCreate dump fields)
+
+4. course_outcomes
+   - id, subject_id, co_code, description
+
+5. syllabus_units
+   - id, subject_id, unit_number, title, description, topics (array of topic objects may be embedded)
+
+6. syllabus_topics
+   - id, unit_id, topic_name, description, co_id
+
+7. syllabus_documents  (NEW vs old SQLite-centric notes)
+   - id, subject_id, filename, file_path, file_type, academic_year, uploaded_by_id, uploaded_by_name, unit_count, co_count, raw_text_length
+
+8. subject_documents
+   - id, subject_id, unit_id, doc_type (SYLLABUS, CO_DOC, PPT, NOTES, EXAM_PATTERN, RULES, OTHER), title, filename, file_path, academic_year, semester, uploaded_by_id, extracted_text
+
+9. examination_patterns
+   - id, subject_id, total_marks, duration_minutes, choice_pattern, min_co_coverage_pct, min_unit_coverage_pct, solve_time_limit_pct, similarity_threshold (defaults 70.0 on some create paths)
+
+10. examinations
+    - id, subject_id, title, exam_type, academic_year, semester, total_marks, duration_minutes, selected_units / selected_units_json, created_at
+
+11. question_papers
+    - id, title, subject_id, examination_id, uploaded_by_id, filename, filepath, file_path, file_type, academic_year, exam_type, selected_units_json, status, overall_score, version, raw_text, normalized_text, instructions_json
+    - After moderator review also: moderator_decision, moderator_feedback, moderator_name, moderated_at
+    - Status values used in code: SUBMITTED, EXTRACTED, ANALYZING, PENDING_REVIEW, APPROVED, MODIFICATION_REQUIRED, REJECTED, EXTRACTION_FAILED, FAILED (SQLAlchemy enum also lists DRAFT, ANALYZED, PARSED, NEEDS_MODIFICATION)
+
+12. extracted_questions
+    - id, paper_id, question_number, original_number, sub_question, question_text, original_text, marks (nullable; pipeline never invents default marks), internal_choice, section_name, sequence_order
+    - question_type (QUESTION, SUBQUESTION, QUESTION_GROUP), parent_question_id, choice_group_id
+    - parse_confidence, marks_confidence, metadata_confidence
+    - co_code, bloom_level, detected_unit_number, topic_name, raw_text, normalized_text
+    - is_unit_selected, unit_validation_status (VALID | UNSELECTED_UNIT | UNMAPPED)
+
+13. previous_papers
+    - id, subject_id, academic_year, exam_type, title, file_path, uploaded_at
+
+14. previous_questions
+    - id, paper_id, question_number, question_text, marks
+
+15. question_embeddings
+    - id, previous_question_id, vector_json (JSON string of 64 floats from hash bag-of-tokens)
+
+16. scrutiny_reports
+    - id, paper_id, version, overall_score, solving_time_minutes, compliance_summary, created_at
+
+17. rule_results
+    - report_id, category, rule_name, expected_value, actual_value, status (PASS | WARNING | FAIL), message
+
+18. scrutiny_findings
+    - report_id, question_id, finding_type (BLOOM, CO, SYLLABUS, GRAMMAR, QUALITY), ai_value, confidence, reasoning, suggested_improvement
+    - Moderator corrections overwrite ai_value and reasoning on matching (report_id, question_id, finding_type)
+
+19. similarity_results
+    - report_id, question_id, matched_previous_question_id, similarity_score, explanation
+
+20. moderator_reviews
+    - id, paper_id, report_id, moderator_id, moderator_name, moderator_role, decision, remarks, required_action, corrections (array), created_at, updated_at
+    - Alternate insert path via POST /api/reports/{paper_id}/decision uses previous_status, new_status, feedback, reviewed_at
+
+21. audit_logs
+    - id, action, entity, entity_type, entity_id, user_id, user_role, details, metadata_json, timestamp
+
+LEGACY SQLAlchemy models still defined in backend/app/models/models.py (NOT used by live routers):
+User, Subject, SubjectDocument, Examination, CourseOutcome, SyllabusUnit, SyllabusTopic, ExamPattern/ExaminationPattern, QuestionPaper, ExtractedQuestion (aliased as Question), PreviousPaper, PreviousQuestion, QuestionEmbedding, ScrutinyReport, ScrutinyFinding, RuleResult, SimilarityResult, ModeratorReview, ModeratorCorrection, AuditLog.
+Legacy extra fields vs older notes: User.is_active; ExamPattern.similarity_threshold; QuestionPaper.raw_text/normalized_text/instructions_json/version/file_path; ExtractedQuestion hierarchy/confidence fields; ScrutinyReport.compliance_summary/summary_json/solving_time_minutes; ScrutinyFinding.evidence/suggested_improvement; SimilarityResult.threshold/status; ModeratorCorrection table; AuditLog.entity_type/details/timestamp.
+
+MIGRATION:
+- backend/app/db/migrate_to_mongo.py copies listed SQLite tables from backend/scrutiny.db into MongoDB if the SQLite file exists.
+
+--------------------------------------------------------------------------------
+    4. API ENDPOINTS (CURRENT)
+--------------------------------------------------------------------------------
+Global prefix: settings.API_V1_STR = "/api"
+Auth: most endpoints require Bearer JWT except GET `/`, GET `/api/dashboard/public-stats`, POST `/api/auth/login`.
+Token may also be passed as query `token` (get_current_user).
+
+ROOT:
+- GET `/` — JSON: status online, app name, database "MongoDB", ai_provider, docs path. No auth.
+
+AUTH:
+- POST `/api/auth/login` — JSON {email, password}. Returns {access_token, token_type: bearer, user}. 401 incorrect credentials. 400 inactive. Logs LOGIN.
+- GET `/api/auth/me` — current user profile. 401 if invalid token.
+
+USERS (ADMIN only):
+- GET `/api/admin/users` — list users. Role ADMIN.
+- POST `/api/admin/users` — create user {email, full_name, password, role, department}. Role ADMIN. 400 if email exists.
+  NOTE: Old notes listed GET/POST `/api/users`. That path is no longer the router prefix.
+
+SUBJECTS & CURRICULUM:
+- GET `/api/subjects` — list subjects. Authenticated.
+- POST `/api/subjects` — create subject. Roles ADMIN, MODERATOR only (Faculty cannot create subjects via this API). Also upserts default examination_patterns.
+- GET `/api/subjects/{subject_id}` — one subject.
+- GET `/api/subjects/{subject_id}/documents` — list subject_documents.
+- POST `/api/subjects/{subject_id}/documents` — multipart: title, doc_type, unit_id, academic_year, semester, file. Extracts text via document_service.
+- DELETE `/api/subjects/{subject_id}/documents/{doc_id}` — delete record and file.
+- GET `/api/subjects/{subject_id}/dashboard` — stats, doc_breakdown, units, COs, recent papers.
+- GET `/api/subjects/{subject_id}/cos` — list COs.
+- POST `/api/subjects/{subject_id}/cos` — add CO (any authenticated user on this subjects router).
+- DELETE `/api/subjects/{subject_id}/cos/{co_id}` — delete CO.
+- GET `/api/subjects/{subject_id}/syllabus` — units with topics (embedded or from syllabus_topics).
+- POST `/api/subjects/{subject_id}/syllabus` — add unit; auto next unit_number if missing.
+- PUT `/api/subjects/{subject_id}/syllabus/{unit_id}` — update unit.
+- DELETE `/api/subjects/{subject_id}/syllabus/{unit_id}` — delete unit and its syllabus_topics.
+- POST `/api/subjects/{subject_id}/syllabus/{unit_id}/topics` — add topic; also $push onto unit.topics.
+- DELETE `/api/subjects/{subject_id}/syllabus/{unit_id}/topics/{topic_id}`
+- GET `/api/subjects/{subject_id}/rules` — exam pattern; creates defaults if missing.
+- PUT `/api/subjects/{subject_id}/rules` — ADMIN, MODERATOR.
+
+DUPLICATE CO ROUTER (prefix `/api/subjects/{subject_id}/cos` from cos.py, also registered):
+- GET same as above.
+- POST create CO — require_role ADMIN only (stricter than subjects.py POST).
+
+DUPLICATE RULES ROUTER (rules_config.py, same URL `/api/subjects/{subject_id}/rules`):
+- GET / PUT with ExamPatternOut schema; PUT ADMIN, MODERATOR.
+
+SYLLABUS FILE UPLOAD (syllabus.py, no extra prefix beyond /api):
+- POST `/api/subjects/{subject_id}/syllabus/upload` — FACULTY, MODERATOR, ADMIN. PDF/DOCX/DOC/TXT. Parses COs/units/topics with regex. Optional replace_existing (default true). Writes syllabus_documents + syllabus_units + syllabus_topics + course_outcomes.
+- GET `/api/subjects/{subject_id}/syllabus/status` — upload status, documents, units, COs.
+- DELETE `/api/subjects/{subject_id}/syllabus/documents/{doc_id}` — ADMIN, MODERATOR.
+
+EXAMINATIONS:
+- GET `/api/examinations?subject_id=` — list.
+- POST `/api/examinations` — create exam config with selected_units.
+- GET `/api/examinations/{exam_id}`
+
+PAPERS:
+- GET `/api/papers` — FACULTY sees only own uploads; MODERATOR/ADMIN all. Optional subject_id, status_filter.
+- GET `/api/papers/{id}` — paper + questions + latest moderator_review. Faculty owner-only.
+- POST `/api/papers/upload` — FACULTY, ADMIN, MODERATOR. Form: title, subject_id, academic_year, exam_type, examination_id, selected_units, auto_analyze (default true), file (pdf/docx/doc/txt). Extracts questions; if auto_analyze runs full scrutiny. 422 extraction fail; 502 analysis fail.
+- POST `/api/papers/{paper_id}/analyze` — re-run extraction if no questions, then scrutiny.
+- POST `/api/papers/{paper_id}/resume` — alias of analyze.
+- DELETE `/api/papers/{paper_id}` — ADMIN/MODERATOR or owning FACULTY (faculty cannot delete APPROVED). Cascades questions, reports, rules, findings, similarity, reviews, disk file. Audit DELETE.
+
+QUESTIONS:
+- GET `/api/questions/{id}` — one extracted_question.
+
+PREVIOUS PAPERS:
+- GET `/api/previous-papers?subject_id=` — list with nested questions.
+- POST `/api/previous-papers/upload` — form subject_id, title, academic_year/year, exam_type, selected_units, file. Parses questions, stores embeddings. Authenticated (no extra role lock).
+- DELETE `/api/previous-papers/{paper_id}` — cascade questions, embeddings, file.
+
+SCRUTINY:
+- GET `/api/scrutiny/{paper_id}` — latest report + rule_results + findings + similarity_results. Faculty owner-only.
+- GET `/api/scrutiny/reports/{paper_id}/export/pdf`
+- GET `/api/scrutiny/reports/{paper_id}/export/csv`
+- GET `/api/scrutiny/reports/{paper_id}/export/json`
+  Frontend downloadScrutinyReport uses these scrutiny export URLs.
+
+REPORTS (parallel):
+- GET `/api/reports/{paper_id}` — same latest report payload.
+- POST `/api/reports/{paper_id}/decision` — MODERATOR, ADMIN. Body ModeratorDecisionRequest (new_status, remarks). Updates paper status; inserts a simpler moderator_reviews row. Frontend PaperScrutiny does NOT call this; it calls moderator reviews.
+- GET `/api/reports/{paper_id}/export/pdf|csv|json` — delegates to scrutiny export functions.
+
+MODERATOR:
+- POST `/api/moderator/reviews/{paper_id}` — MODERATOR, ADMIN. Body ModeratorReviewCreate: decision, remarks, corrections[]. Maps APPROVE/APPROVED -> APPROVED; MODIFY/NEEDS_MODIFICATION/MODIFICATION_REQUIRED -> MODIFICATION_REQUIRED; REJECT/REJECTED -> REJECTED. Writes review, updates paper, applies finding corrections, audit MODERATOR_*.
+- GET `/api/moderator/reviews/{paper_id}` — latest review; faculty owner-only.
+- GET `/api/moderator/feedback/export?format=csv|json` — MODERATOR, ADMIN. Flattens review.corrections into CSV/JSON. FeedbackExport page opens this URL in a new tab (does not attach axios Authorization header).
+
+DASHBOARD:
+- GET `/api/dashboard/public-stats` — no auth. Landing counters. If no reports, hardcoded fallback avg_score 78.5 and compliance 88.5.
+- GET `/api/dashboard/stats` — authenticated; faculty filtered to own papers. Cards, bloom_distribution, status_distribution, recent_papers.
+
+HISTORY:
+- GET `/api/history?subject_id=` — paper list with scores and latest moderator fields. Faculty own papers only.
+- GET `/api/history/{paper_id}` — paper_info, reports_history, moderator_reviews, audit_timeline.
+- DELETE `/api/history/{paper_id}` — calls papers.delete_paper.
+
+REMOVED RELATIVE TO OLD NOTES:
+- GET/POST `/api/users` as the documented path (moved to `/api/admin/users`).
+- Standalone AuditLogs page/API as a separate frontend file (history now serves that UI).
+
+--------------------------------------------------------------------------------
+    5. FRONTEND (CURRENT)
+--------------------------------------------------------------------------------
+Entry: frontend/src/main.jsx wraps ThemeProvider then App.
+Router: frontend/src/App.jsx
+
+PUBLIC ROUTES:
+- `/` LandingPage.jsx — college landing; fetches /dashboard/public-stats
+- `/login` Login.jsx — email/password; demo fill buttons for Faculty/Moderator/Admin emails; JWT stored in localStorage keys `token` and `user`; navigates to /dashboard
+- `*` catch-all -> `/`
+
+PROTECTED (ProtectedRoute + MainLayout):
+- `/dashboard` Dashboard.jsx — subject filter, /dashboard/stats, optional /subjects/{id}/dashboard, Recharts bloom pie and status charts, recent papers
+- `/papers/upload` UploadPaper.jsx — subject, metadata, unit checkboxes, drag-drop PDF/DOCX/TXT, POST /papers/upload then optional /papers/{id}/analyze, then navigate to /papers/:id
+- `/syllabus` SyllabusUploadPage.jsx — NEW. Faculty/Admin nav. Upload syllabus file; status; delete documents
+- `/papers/:id` PaperScrutiny.jsx — GET paper, GET scrutiny, GET moderator review; resume analyze; moderator POST reviews; exports via exportUtils
+- `/history` PaperHistory.jsx — GET /history, timeline GET /history/{id}, resume, delete via /history/{id}. Replaces old AuditLogs.jsx (that file is not in src/pages)
+- `/subjects` SubjectManagement.jsx — create subject (API still ADMIN/MODERATOR), units/topics/COs/documents
+- `/previous-papers` PreviousPapers.jsx — question bank upload/list/delete
+- `/moderator/feedback` FeedbackExport.jsx — Moderator/Admin nav. CSV/JSON export via window.open
+
+MainLayout.jsx navigation by role:
+- All: Dashboard, History, Subjects & Rules, Question Bank, College Home
+- Faculty or Admin: Upload Question Paper, Syllabus Upload
+- Moderator or Admin: Moderator Feedback Export
+- Header: ThemeToggle; label "Google Gemini & NLP"
+
+Components (used):
+- layouts/MainLayout.jsx
+- components/common/ThemeToggle.jsx, ScoreCard.jsx, ConfirmModal.jsx, Badge.jsx
+- context/AuthContext.jsx, ThemeContext.jsx
+- services/api.js
+- utils/exportUtils.js — downloadScrutinyReport, downloadModeratorDataset
+
+UNWIRED PAGE FILES (exist under frontend/src/pages but are NOT imported in App.jsx):
+DashboardPage.jsx, LoginPage.jsx, PaperUploadPage.jsx, PapersListPage.jsx, ScrutinyReportPage.jsx, HistoryListPage.jsx, HistoryDetailPage.jsx, SubjectsPage.jsx, SubjectDetailPage.jsx, PreviousPapersPage.jsx, ModeratorFeedbackPage.jsx, ModeratorQueuePage.jsx, PaperDetailPage.jsx, SettingsPage.jsx, UsersAdminPage.jsx
+These are leftover pages, not active routes.
+
+UI / STATE:
+- Auth: React context + localStorage
+- Theme: dark/light on html class and data-theme
+- ConfirmModal used for destructive confirms (history delete, etc.)
+- Tailwind + glass-style cards; brand indigo/slate
+
+--------------------------------------------------------------------------------
+    6. IMPORTANT BACKEND FUNCTIONS / CLASSES
+--------------------------------------------------------------------------------
+
+File: backend/app/main.py
+- lifespan: create upload dirs; get_mongo_db + init_mongo_indexes
+- include_router for all API modules
+- root()
+
+File: backend/app/core/config.py
+- class Settings(BaseSettings): PROJECT_NAME, JWT_SECRET/SECRET_KEY, GEMINI_*, AI_PROVIDER, MONGODB_URI, MONGODB_DB_NAME, DATABASE_URL (legacy SQLite), UPLOAD_DIR, MAX_UPLOAD_SIZE_MB, get_database_url()
+
+File: backend/app/core/security.py
+- verify_password(plain, hashed) -> bool
+- get_password_hash(password) -> str
+- create_access_token(data=None, expires_delta=None, subject=None, role=None) -> JWT string
+- decode_access_token(token) -> dict | None
+Used by: auth.py, users.py, seed_data.py
+
+File: backend/app/core/dependencies.py
+- class MongoUser(data)
+- get_current_user(request, db, header_token) -> MongoUser (jose jwt decode with SECRET_KEY)
+- require_role(allowed_roles) -> dependency
+Used by: all protected routers
+
+File: backend/app/db/mongo.py
+- get_mongo_client, get_mongo_db, get_db, get_next_sequence, serialize_doc, serialize_docs, init_mongo_indexes
+
+File: backend/app/services/scrutiny_pipeline.py
+- _safe_marks(value) -> int | None
+- extract_and_store_questions(db, paper) -> {ok, parsed_count, error, detailed}
+  Logic: DocumentExtractionService.extract_text -> QuestionParserService.parse_paper_detailed -> insert QUESTION_GROUP then questions; status EXTRACTED or EXTRACTION_FAILED
+- run_scrutiny_analysis(db, paper) -> {ok, report_id, overall_score, ...}
+  Logic: load questions/COs/units; gemini_service.analyze_paper_questions; update extracted_questions; subject-isolated previous_questions TF-IDF similarity; rule_engine.validate_paper; report_service.calculate_scrutiny_score; persist report/findings/rules/similarity; paper status PENDING_REVIEW
+Used by: papers.py upload/analyze/resume
+
+File: backend/app/services/extraction_service.py
+- class ScannedDocumentException
+- class DocumentExtractionService: resolve_path, extract_text, _extract_from_pdf, _extract_from_docx; raises ScannedDocumentException if PDF has no text layer
+
+File: backend/app/services/question_parser.py
+- class QuestionParserService: parse_paper_detailed, parse_extracted_text — deterministic numbering, marks, sections, choice groups; does not invent marks
+
+File: backend/app/services/gemini_service.py
+- class AIQuestionAnalysis (Pydantic)
+- class GeminiService:
+  - _call_gemini_raw, _generate_structured_json
+  - analyze_paper_questions(...) — Gemini if AI_PROVIDER=gemini and key present, else _semantic_heuristic_analysis
+  - _call_gemini_scrutiny — academic JSON array prompt
+  - _semantic_heuristic_analysis — Bloom verbs, CO keyword overlap (needs score>=2), unit/topic keywords (needs max_matches>=3 else null)
+  - backward-compat: analyze_bloom, map_co, map_syllabus, check_grammar, evaluate_quality, estimate_solving_time, generate_recommendations
+- gemini_service singleton
+USED by scrutiny_pipeline. Individual bloom_service/co_mapping_service/etc. are NOT called by the live pipeline.
+
+File: backend/app/services/similarity_service.py
+- compute_embedding_vector(text) -> 64-float list (hash buckets, L2-normalized)
+- find_similar_questions(current_text, previous_questions, top_k=3) -> matches with score >= 0.65 using TF-IDF cosine
+- threshold default 0.65 (exam pattern similarity_threshold 70.0 is not passed into this service in the pipeline)
+
+File: backend/app/rules/rule_engine.py
+- class RuleEngine.validate_paper(...) -> list of rule dicts
+  Rules: Total Marks Verification; Question Numbering Consistency; Internal Choice Validation; Course Outcome (CO) Coverage; Selected Unit Syllabus Coverage; Exam Unit Selection Compliance; Bloom's Cognitive Distribution (>=40% K3–K6); Solving Time Estimation Check
+- validate_marks, validate_numbering helpers
+- rule_engine singleton
+Solving time passed from pipeline is duration_minutes * 0.8, not per-question Gemini time.
+
+File: backend/app/services/report_service.py
+- calculate_score_breakdown / calculate_scrutiny_score: 15+5+15+15+20+10+10+5+5 = 100
+- generate_csv_export, generate_json_export
+- report_service / ScrutinyReportService aliases
+
+File: backend/app/utils/pdf_export.py
+- PDFReportExporter.create_pdf_report(payload)
+- generate_reportlab_pdf (used by reports.py import)
+
+File: backend/app/services/audit_service.py
+- AuditService.log_action(db, action, entity, entity_id, user_id, user_role, metadata, details)
+
+File: backend/app/services/document_service.py
+- DocumentService.extract_text_from_file — PDF/DOCX/PPTX/TXT for subject document uploads
+
+File: backend/app/api/syllabus.py
+- parse_syllabus_text(text) -> {course_outcomes, units}
+
+File: backend/app/services/history_service.py
+- HistoryService.get_full_paper_history — DEFINED but not imported by history.py (history router queries Mongo itself)
+
+LEFTOVER SERVICES (files exist; pipeline does not import them):
+bloom_service.py, co_mapping_service.py, syllabus_service.py, grammar_service.py, quality_service.py, solving_time_service.py, recommendation_service.py
+Matching prompt files under backend/app/prompts/ (bloom_prompt.py, co_prompt.py, etc. and prompts.py) are not on the live analyze_paper_questions path.
+
+--------------------------------------------------------------------------------
+    7. AI / ML (CURRENT IMPLEMENTATION)
+--------------------------------------------------------------------------------
+Provider switch: settings.AI_PROVIDER  (`mock` default, or `gemini`)
+Model: settings.GEMINI_MODEL (config default gemini-1.5-flash; .env.example lists gemini-2.5-flash; GeminiService falls back to gemini-2.5-flash if model unset)
+Library actually called: google.generativeai GenerativeModel.generate_content
+Package google-genai is in requirements.txt but not imported by gemini_service.py.
+
+When Gemini is used:
+- System-style prompt in _call_gemini_scrutiny: academic scrutiny engine; do not invent marks/CO/Bloom/unit/topic; parser values take precedence; return JSON array of bloom_level, co_code, unit_number, topic_name, confidence, reasoning, grammar_status, quality_status, suggested_improvement.
+- JSON is stripped of markdown fences and validated with AIQuestionAnalysis.
+- Bloom from AI must match K1–K6; CO must match CO + digits.
+
+When mock / missing key / Gemini failure:
+- _semantic_heuristic_analysis (verb lists for Bloom; CO description word overlap; syllabus title/topic keywords).
+
+NOT implemented as claimed vector RAG:
+- No embedding model API (OpenAI/Gemini embeddings).
+- No vector database similarity index.
+- Prompt stuffing of syllabus/CO lists is the only LLM context retrieval.
+
+Similarity:
+- sklearn TF-IDF unigrams+bigrams, english stop words, cosine, threshold 0.65, top_k 3, same subject_id previous bank.
+
+Scoring: deterministic report_service from rule statuses, grammar/quality FAIL/WARNING counts, max similarity score.
+
+--------------------------------------------------------------------------------
+    8. AUTHENTICATION, AUTHORIZATION, SECURITY
+--------------------------------------------------------------------------------
+- Login: email+password against Mongo users.hashed_password (bcrypt).
+- JWT HS256, exp ACCESS_TOKEN_EXPIRE_MINUTES (default 1440). Claims include sub (user id) and role.
+- Inactive users rejected.
+- Roles: FACULTY, MODERATOR, ADMIN via require_role.
+- Paper list/get/analyze: faculty scoped to uploaded_by_id.
+- Subject create: ADMIN, MODERATOR.
+- Moderator decisions: MODERATOR, ADMIN.
+- User admin CRUD: ADMIN.
+- CORS: allow_origins=["*"], allow_credentials=True, all methods/headers.
+- Secrets from environment / .env; do not commit real keys.
+- File types restricted to pdf/docx/doc/txt on paper and syllabus upload; subject documents accept uploaded file and extract by extension.
+- No OCR for scanned PDFs: ScannedDocumentException -> EXTRACTION_FAILED.
+- JWT_SECRET default in config.py is a development fallback string; production must override.
+- FeedbackExport window.open may omit Authorization header (export endpoint requires MODERATOR/ADMIN JWT).
+
+--------------------------------------------------------------------------------
+    9. ENVIRONMENT VARIABLES
+--------------------------------------------------------------------------------
+From backend/.env.example and settings (never store real secrets here):
+
+- GEMINI_API_KEY=[SECRET HIDDEN]
+- GEMINI_MODEL=gemini-2.5-flash  (example; code defaults differ if unset)
+- AI_PROVIDER=mock | gemini
+- DATABASE_URL=sqlite:///./scrutiny.db  (legacy SQLAlchemy only)
+- JWT_SECRET=[SECRET HIDDEN]
+- JWT_ALGORITHM=HS256
+- ACCESS_TOKEN_EXPIRE_MINUTES=1440
+- UPLOAD_DIR=uploads
+- MONGODB_URI=mongodb://localhost:27017  (code default; not in .env.example)
+- MONGODB_DB_NAME=question_paper_scrutiny  (code default; not in .env.example)
+
+--------------------------------------------------------------------------------
+    10. DEPENDENCIES
+--------------------------------------------------------------------------------
+backend/requirements.txt (declared):
+fastapi, uvicorn[standard], pydantic, pydantic-settings, sqlalchemy, alembic, psycopg2-binary, python-jose[cryptography], passlib[bcrypt], python-multipart, google-genai, google-generativeai, PyMuPDF, python-docx, nltk, scikit-learn, numpy, reportlab, pytest, httpx
+
+USED IN LIVE CODE but missing from requirements.txt:
+- pymongo (imported throughout API/db)
+- python-pptx (optional import in document_service)
+- pydantic EmailStr typically needs email-validator (UserLogin uses EmailStr)
+
+DECLARED BUT NOT IMPORTED IN APP CODE:
+- nltk (only in requirements.txt)
+- alembic / psycopg2-binary (no live Postgres/Alembic usage in app/main)
+- google-genai (gemini_service uses google.generativeai)
+
+frontend/package.json:
+axios, lucide-react, react, react-dom, react-router-dom, recharts
+dev: @vitejs/plugin-react, autoprefixer, postcss, tailwindcss, vite, @types/react, @types/react-dom
+
+--------------------------------------------------------------------------------
+    11. FOLDER AND FILE STRUCTURE (IMPORTANT PATHS)
+--------------------------------------------------------------------------------
+ai-question-paper-scrutiny/
+  note.txt                          Previous documentation filename
+  notes.txt                         This current documentation
+  .vscode/tasks.json                Run Full Application (backend 8000 + frontend 3000)
+  scripts/seed_data.py              Mongo user seed
+  scripts/generate_demo_syllabus.py Demo syllabus generator
+  uploads/                          Root uploads (syllabus, demo samples)
+  backend/
+    app/main.py                     FastAPI app
+    app/core/config.py, security.py, dependencies.py
+    app/db/mongo.py, migrate_to_mongo.py, database.py (legacy), init_db.py (legacy)
+    app/api/                        auth, users, subjects, examinations, cos, syllabus, rules_config, papers, questions, previous_papers, scrutiny, reports, history, moderator, dashboard
+    app/services/                   scrutiny_pipeline, gemini_service, extraction_service, question_parser, similarity_service, report_service, audit_service, document_service, history_service + leftover AI micro-services
+    app/rules/rule_engine.py
+    app/utils/pdf_export.py
+    app/schemas/schemas.py, domain_schemas.py
+    app/models/models.py, domain_models.py
+    app/prompts/                    leftover prompt templates
+    tests/                          test_auth, test_rule_engine, test_scrutiny, test_parser_regression, test_features_e2e
+    requirements.txt, .env.example
+    uploads/                        papers, previous_papers, syllabus
+  frontend/
+    src/App.jsx, main.jsx, index.css
+    src/pages/                      (wired pages listed in section 5)
+    src/layouts/MainLayout.jsx
+    src/components/common/
+    src/context/
+    src/services/api.js
+    src/utils/exportUtils.js
+    vite.config.js, tailwind.config.js, package.json
+
+--------------------------------------------------------------------------------
+    12. DATA FLOW (CURRENT)
+--------------------------------------------------------------------------------
+PUBLIC USER
+  -> LandingPage GET /api/dashboard/public-stats
+  -> Login POST /api/auth/login -> JWT in localStorage
+
+FACULTY / ADMIN
+  -> Create/configure subject (ADMIN/MODERATOR create) and units/COs/PPTs
+  -> Optional POST /api/subjects/{id}/syllabus/upload (parse into Mongo)
+  -> Optional previous-papers upload (index questions + hash embeddings)
+  -> POST /api/papers/upload (file + selected_units)
+        -> extract_and_store_questions (PDF/DOCX/TXT -> parser -> extracted_questions)
+        -> run_scrutiny_analysis
+              -> Gemini or heuristic mapping
+              -> TF-IDF similarity vs previous_questions of same subject
+              -> RuleEngine
+              -> score persist scrutiny_reports + findings + rule_results
+        -> paper PENDING_REVIEW
+  -> PaperScrutiny UI GET /api/papers/{id} + /api/scrutiny/{id}
+
+MODERATOR / ADMIN
+  -> POST /api/moderator/reviews/{id} decision + optional corrections
+  -> paper APPROVED | MODIFICATION_REQUIRED | REJECTED
+  -> Export PDF/CSV/JSON via /api/scrutiny/reports/{id}/export/*
+  -> Optional feedback dataset export
+
+ALL AUTHENTICATED
+  -> Dashboard stats (faculty filtered)
+  -> History list/timeline/audit_logs
+  -> AuditService writes on login, upload, analyze, decision, syllabus, delete
+
+--------------------------------------------------------------------------------
+    13. USER WORKFLOW
+--------------------------------------------------------------------------------
+1. Open http://localhost:3000/ (landing) or /login.
+2. Sign in as FACULTY, MODERATOR, or ADMIN (seeded accounts).
+3. ADMIN/MODERATOR create subject codes; faculty upload syllabus and build units/topics/COs/PPTs.
+4. Faculty upload historical papers to the subject question bank.
+5. Faculty upload a current paper, select examination units, wait for extraction + analysis.
+6. Open scrutiny report: score, per-question Bloom/CO/unit/similarity, rule matrix.
+7. If analysis failed, Resume from paper page or history (POST /papers/{id}/resume).
+8. Moderator records Approve / Modification required / Reject and remarks.
+9. Faculty sees decision on paper and history; cannot delete APPROVED papers.
+10. Export official report; moderators may export correction dataset.
+
+--------------------------------------------------------------------------------
+    14. DEFAULT DEMO USER ACCOUNTS
+--------------------------------------------------------------------------------
+Seeded by scripts/seed_data.py into MongoDB users (creates or updates hash):
+
+1. Faculty — email faculty@college.edu — role FACULTY — department Computer Science & Engineering
+   Password: [SECRET HIDDEN] (seeded in seed_data.py; Login.jsx demo fill uses the same seeded value)
+2. Chief Moderator — email moderator@college.edu — role MODERATOR
+   Password: [SECRET HIDDEN]
+3. Admin — email admin@college.edu — role ADMIN — Exam Cell
+   Password: [SECRET HIDDEN]
+
+Permissions in code (summary):
+- FACULTY: upload papers (own list), syllabus upload, units/COs/docs (subjects routes without extra role), previous papers, view own scrutiny/history; cannot create subjects; cannot submit moderator decisions; cannot delete approved own papers.
+- MODERATOR: create subjects, rules, moderator reviews, feedback export, view all papers, delete papers.
+- ADMIN: user management, plus moderator capabilities, syllabus document delete.
+
+--------------------------------------------------------------------------------
+    15. HOW TO RUN
+--------------------------------------------------------------------------------
+Prerequisites: Python with backend deps, Node for frontend, MongoDB listening on MONGODB_URI.
+
+Terminal 1:
+  cd backend
+  python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+Terminal 2:
+  cd frontend
+  npm run dev
+
+Seed users (Mongo must be up):
+  python scripts/seed_data.py
+
+Optional SQLite -> Mongo:
+  python backend/app/db/migrate_to_mongo.py
+
+VS Code: Tasks: Run Task -> Run Full Application
+
+URLs: http://localhost:3000/  http://localhost:8000/  http://localhost:8000/docs
+
+Tests:
+  cd backend
+  pytest
+  Files: tests/test_auth.py, test_rule_engine.py, test_scrutiny.py, test_parser_regression.py, test_features_e2e.py
+
+--------------------------------------------------------------------------------
+    16. ERROR HANDLING
+--------------------------------------------------------------------------------
+- 401 invalid JWT or login
+- 403 role/ownership
+- 404 missing subject/paper/report
+- 400 invalid decision / faculty delete APPROVED / duplicate email or subject code
+- 422 extraction/analysis validation (no questions, scanned PDF)
+- 502 scrutiny analysis failed on upload auto_analyze
+- Pipeline sets paper status EXTRACTION_FAILED or FAILED
+- Gemini failures fall back to heuristic
+- File delete failures logged, not always fatal
+
+--------------------------------------------------------------------------------
+    17. TESTING
+--------------------------------------------------------------------------------
+- pytest + httpx TestClient against app.main:app
+- test_auth: faculty login success and wrong password
+- test_rule_engine, test_parser_regression, test_scrutiny, test_features_e2e exist and exercise backend features (E2E may require Mongo)
+
+--------------------------------------------------------------------------------
+    18. PERFORMANCE TECHNIQUES
+--------------------------------------------------------------------------------
+- Mongo indexes on id, subject_id, paper_id, email, status, audit timestamp
+- PyMongo connection pool maxPoolSize=50 minPoolSize=5
+- Axios timeout 180000 for long Gemini/analysis
+- Vite proxy to avoid CORS in dev (backend also allows *)
+- Faculty queries filtered by uploaded_by_id
+- TF-IDF computed in-process per question against that subject's previous bank (not ANN index)
+
+--------------------------------------------------------------------------------
+    19. DESIGN PATTERNS & PROGRAMMING CONCEPTS ACTUALLY USED
+--------------------------------------------------------------------------------
+- REST API, HTTP, JSON, multipart file upload
+- Layered FastAPI routers + services
+- Dependency injection (Depends get_db, get_current_user, require_role)
+- JWT authentication, bcrypt hashing, RBAC
+- Singleton service instances (gemini_service, similarity_service, rule_engine, report_service)
+- Pydantic schemas for request/response
+- Async contextmanager lifespan (startup Mongo)
+- Sync route handlers (not async DB)
+- Strategy-like AI_PROVIDER mock vs gemini with heuristic fallback
+- Pipeline orchestration (extract -> parse -> AI -> rules -> score -> persist)
+- Cascading delete in application code
+- React SPA routing, protected routes, context state, interceptors
+- Deterministic rule engine vs probabilistic/heuristic AI
+- CRUD on Mongo collections
+- File handling on disk under UPLOAD_DIR
+- Exception handling HTTPException
+- Report generation (PDF/CSV/JSON)
+- Not used in live path: SQLAlchemy sessions, Alembic migrations at startup, NLTK, dedicated vector DB, automatic model retraining
+
+--------------------------------------------------------------------------------
+    20. LIMITATIONS
+--------------------------------------------------------------------------------
+- Requires a running MongoDB; app logs connection errors but still yields the ASGI app.
+- pymongo not listed in requirements.txt (install risk).
+- Scanned image PDFs fail (no OCR).
+- Similarity is lexical TF-IDF, not deep semantic embeddings; stored 64-d vectors unused at search time.
+- Solving-time rule uses 80% of duration, not real student-time modeling.
+- public-stats uses placeholder averages when the DB is empty.
+- Duplicate overlapping routers (COs, rules, reports vs moderator decisions).
+- CORS allow_origins * with credentials is a loose development setting.
+- Default JWT secret in source if env unset.
+- Leftover SQLAlchemy and unused frontend pages can confuse readers.
+- Feedback export via window.open may fail auth.
+- Faculty subject-create is blocked by API even if UI offers a create form.
+- No automatic Gemini fine-tuning; correction export is a dataset dump only.
+
+--------------------------------------------------------------------------------
+    21. VIVA / INTERVIEW QUESTIONS (CURRENT PROJECT)
+--------------------------------------------------------------------------------
+
+BASIC
+Q: What is this project?
+A: A decision-support web app that extracts questions from uploaded papers, checks institutional rules, maps Bloom/CO/units, flags similar historical questions, and lets a moderator approve, request changes, or reject.
+
+Q: Who are the users?
+A: FACULTY, MODERATOR, and ADMIN, stored in MongoDB users with JWT login.
+
+TECHNOLOGY
+Q: What is the live database?
+A: MongoDB via PyMongo. SQLAlchemy/SQLite models remain in the repo but FastAPI routes use mongo.get_db.
+
+Q: Frontend stack?
+A: React 18, Vite 5, React Router 6, Tailwind, axios, recharts, lucide-react.
+
+ARCHITECTURE
+Q: How is scrutiny executed?
+A: papers.upload or analyze calls extract_and_store_questions then run_scrutiny_analysis in scrutiny_pipeline.py.
+
+Q: How are integer IDs kept on MongoDB?
+A: counters collection atomic $inc in get_next_sequence.
+
+DATABASE
+Q: How is subject isolation enforced?
+A: Every curriculum and paper record has subject_id; previous-paper similarity loads previous_papers with that subject_id only.
+
+API
+Q: Difference between /api/reports/{id}/decision and /api/moderator/reviews/{id}?
+A: Both record moderator outcomes. The UI uses POST /api/moderator/reviews/{paper_id}, which stores corrections and maps statuses to APPROVED / MODIFICATION_REQUIRED / REJECTED.
+
+AI/ML
+Q: Do you use a vector database?
+A: No. Similarity uses sklearn TF-IDF cosine. Optional Gemini classification uses syllabus text in the prompt. Hash 64-d vectors are stored but not queried.
+
+Q: What happens without GEMINI_API_KEY?
+A: AI_PROVIDER mock or missing key uses _semantic_heuristic_analysis (verbs and keyword overlap).
+
+SECURITY
+Q: How is access controlled?
+A: JWT Bearer, bcrypt passwords, require_role, faculty ownership checks on papers/history/scrutiny.
+
+Q: Are demo passwords documented here?
+A: No. They are seeded in scripts/seed_data.py and must not be treated as production secrets.
+
+PROJECT-SPECIFIC
+Q: What is unit-boundary compliance?
+A: If AI/heuristic maps a question to a unit not in selected_units_json, unit_validation_status becomes UNSELECTED_UNIT and rule "Exam Unit Selection Compliance" FAILs.
+
+Q: How is the 100-point score computed?
+A: report_service.calculate_score_breakdown weights marks, numbering, Bloom, CO, units, grammar/quality, similarity, time, choice.
+
+DIFFICULT
+Q: Why can marks be null?
+A: Parser and _safe_marks refuse to invent default marks; unmarked questions are counted separately in the marks rule.
+
+Q: Why might Mongo embeddings disagree with similarity results?
+A: Embeddings are hash histograms written at previous-paper upload; matching uses a fresh TF-IDF matrix on texts at scrutiny time.
+
+Q: Is syllabus upload NLP or LLM?
+A: Regex/line parser in parse_syllabus_text (Unit/Module/CO patterns), not Gemini.
+
+--------------------------------------------------------------------------------
+    22. PROJECT EXPLANATION
+--------------------------------------------------------------------------------
+
+30-SECOND:
+This is an examination-cell DSS: faculty upload a question paper, the backend parses questions and scores them against syllabus, COs, Bloom levels, marks rules, and past papers, then a human moderator signs off.
+
+1-MINUTE:
+The system is a React SPA and FastAPI service. Curriculum lives per subject in MongoDB. Uploaded PDF/DOCX/TXT papers are extracted with PyMuPDF/python-docx and a deterministic parser. Analysis uses Google Gemini if configured, otherwise keyword heuristics, plus a sklearn similarity check against that subject's previous questions. A rule engine and a transparent 100-point score produce a report. Moderators approve, request modification, or reject. Reports export as PDF, CSV, and JSON.
+
+3-MINUTE:
+Engineering colleges must scrutinize question papers for marks totals, choice patterns, Bloom mix, CO coverage, and unit scope (for example internals covering only units 1–2). This project isolates each subject workspace: units, topics, COs, PPTs, syllabus files, and a historical bank. On upload, questions are stored with hierarchy (groups, subquestions, internal choice) without fake marks. Gemini (or heuristics) fills Bloom/CO/unit when not printed. The rule engine compares calculated marks (capping choice groups), CO/unit coverage percentages, unselected-unit violations, and Bloom higher-order share (>=40% target). Similarity flags repeats. Moderators see evidence, can override finding values, and the audit log records login, upload, analyze, and decisions. JWT roles keep faculty from seeing other faculty papers and from issuing official decisions.
+
+5-MINUTE DETAILED:
+Start MongoDB, seed three role accounts, run Uvicorn on 8000 and Vite on 3000. An admin creates CS301. Faculty upload an official syllabus; regex extracts COs and units into Mongo. They add topics and PPTs. They index last year's paper so TF-IDF has a bank. They upload this term's paper with selected units. extract_and_store_questions writes EXTRACTED questions; run_scrutiny_analysis sets ANALYZING, calls GeminiService.analyze_paper_questions, writes mappings, loads previous_questions for that subject_id, computes cosine matches above 0.65, runs RuleEngine.validate_paper, scores with ReportService, inserts scrutiny_reports version N, and sets PENDING_REVIEW. The scrutiny page loads /api/papers/{id} and /api/scrutiny/{id}. A moderator posts /api/moderator/reviews/{id}. Faculty read history /api/history. Exports go through ReportLab and CSV/JSON builders. Leftover SQLAlchemy models and unused React pages are not on this path. AI is assistive: parser values win over the model, and the moderator is the authority.
+
+--------------------------------------------------------------------------------
+    23. PROGRAMMING CONCEPTS CHECKLIST (SUPPORTED BY CODE)
+--------------------------------------------------------------------------------
+Functions, classes, REST, HTTP, JSON, CRUD, JWT auth, RBAC, middleware (CORS), routing, React context state, MongoDB operations, exception handling, file handling, multipart uploads, Pydantic validation, dependency injection, bcrypt hashing, TF-IDF similarity, cosine similarity, regex parsing, prompt-based LLM (optional), heuristic NLP, report generation, audit logging, SPA protected routes, proxies, theming. OOP aliases and leftover ORM inheritance exist but live persistence is document collections, not SQLAlchemy sessions.
+
+================================================================================
+PROJECT UPDATE HISTORY
+================================================================================
+
+Update Date: 2 October 2026
+
+CHANGES MADE:
+* Replaced SQLite-as-runtime documentation with MongoDB PyMongo as the live database.
+* Documented Gemini provider switch, heuristic fallback, and actual similarity algorithm.
+* Synced API map with current routers including syllabus upload, moderator reviews, public stats, admin users, resume/analyze, history delete.
+* Synced frontend routes (landing, syllabus, theme, feedback export) and listed unwired leftover pages.
+* Corrected auth library (python-jose, not PyJWT), user paths, subject-create roles, and decision status strings.
+* Removed claims of a dedicated vector database / RAG index that the code does not implement.
+* Added scoring breakdown, pipeline functions, env vars without secrets, tests, and limitations.
+
+ADDED:
+* MongoDB collections, counters, serialize helpers, migrate_to_mongo.py
+* GET /api/dashboard/public-stats, syllabus upload/status/delete, POST /papers/{id}/resume, /api/admin/users, /api/moderator/*, /api/examinations, /api/questions/{id}
+* LandingPage, SyllabusUploadPage, ThemeContext/ThemeToggle, FeedbackExport, ConfirmModal, ScoreCard, exportUtils
+* GeminiService live prompt + heuristic; quality findings; MODIFICATION_REQUIRED status
+* pytest suite files under backend/tests
+
+REMOVED (from active-system description):
+* SQLite scrutiny.db as the running store
+* GET/POST /api/users as the user-management path
+* AuditLogs.jsx as a separate page
+* Claim that stored 64-d embeddings are used for search
+* Claim that Faculty can create subjects via POST /api/subjects
+* PyJWT as the JWT library
+
+MODIFIED:
+* FastAPI version string 2.0.0; lifespan Mongo init
+* Paper analysis auto-runs on upload when auto_analyze true
+* Moderator decision vocabulary and corrections embedded in reviews
+* Frontend default route is landing `/` not login
+* Dependencies vs actual imports (pymongo used, nltk unused)
+
+IMPORTANT TECHNICAL CHANGES:
+* Runtime DB: MongoDB `question_paper_scrutiny`
+* AI: google.generativeai when AI_PROVIDER=gemini else heuristics
+* Similarity: sklearn TF-IDF cosine, subject-isolated, threshold 0.65
+* Human-in-the-loop remains mandatory for official paper status
+
+================================================================================
+END OF DOCUMENT
+================================================================================
